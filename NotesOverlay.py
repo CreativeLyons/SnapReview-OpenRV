@@ -6,6 +6,21 @@
 #
 # Notes are stored in RVPaint node properties and persist in session files
 # (including autosave), so they survive crashes and session reloads.
+#
+# ARCHITECTURE:
+# - NotesOverlay.py: Main Python plugin (MinorMode)
+# - notes_dialog.mu: Custom Qt dialog for text input (Mu module)
+#
+# The Mu module is required because:
+# 1. RV's native text entry mode doesn't support copy/paste
+# 2. PySide2/6 may not be available in all RV builds
+# 3. Mu provides direct access to Qt widgets via RV's Qt bindings
+#
+# KEY TECHNICAL DISCOVERIES:
+# - QPushButton.clicked signal passes (bool checked) to callbacks
+# - Mu closures don't work; use module-level globals for widget refs
+# - QLabel requires (text, parent, flags) constructor signature
+# - Use sendInternalEvent() for Mu-to-Python communication
 # -----------------------------------------------------------------------------
 
 import traceback
@@ -20,6 +35,30 @@ from rv.rvtypes import MinorMode
 # RV Runtime for Mu integration
 # -----------------------------------------------------------------------------
 import rv.runtime
+
+# -----------------------------------------------------------------------------
+# PySide imports (optional, for improved text input)
+# -----------------------------------------------------------------------------
+PYSIDE_AVAILABLE = False
+PYSIDE_VERSION = None
+
+try:
+    from PySide2.QtWidgets import QDialog, QVBoxLayout, QPlainTextEdit, QPushButton, QLabel
+    from PySide2.QtCore import Qt
+    import rv.qtutils
+    PYSIDE_AVAILABLE = True
+    PYSIDE_VERSION = "PySide2"
+except ImportError:
+    try:
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QPlainTextEdit, QPushButton, QLabel
+        from PySide6.QtCore import Qt
+        import rv.qtutils
+        PYSIDE_AVAILABLE = True
+        PYSIDE_VERSION = "PySide6"
+    except ImportError:
+        pass
+
+# PySide not required - using QInputDialog via Mu instead
 
 
 class NotesOverlayMode(MinorMode):
@@ -46,7 +85,7 @@ class NotesOverlayMode(MinorMode):
             # Global key bindings: (event, callback, description)
             [
                 ("key-down--N", self.open_note_dialog, "Add note to current frame"),
-                # Internal event for receiving text from Mu text entry mode
+                # Internal event for receiving text from Mu dialog
                 ("notes-overlay-text-entered", self._on_text_entered, "Handle entered note text"),
             ],
             None,  # No override bindings
@@ -64,19 +103,46 @@ class NotesOverlayMode(MinorMode):
 
     def open_note_dialog(self, event):
         """
-        Open the note input dialog using RV's native text entry mode.
+        Show custom multi-line note dialog with copy/paste support.
 
-        Called when user triggers Review > Add Note or presses shift+n.
-        Uses RV's built-in text entry system (Mu-based).
-        Type your note and press Enter to add it.
+        Uses a custom Mu module (notes_dialog.mu) that creates a Qt dialog
+        with QTextEdit for proper multi-line text input. This approach was
+        chosen because:
+        - RV's native text entry mode doesn't support copy/paste
+        - PySide2/6 is not available in this RV build
+        - Mu's Qt bindings provide full Qt widget access
+
+        The dialog sends text back via sendInternalEvent(), which is
+        received by _on_text_entered().
+
+        Technical notes:
+        - 'require notes_dialog' loads the .mu file from RV's Mu path
+        - The Mu module uses global variables for Qt widget references
+          (closures don't work in Mu callbacks)
+        - QPushButton.clicked callbacks must accept (bool checked) parameter
         """
-        # Store the frame number when dialog was opened
         self._pending_note_frame = commands.frame()
 
-        # Test simple Mu execution first
         try:
-            # Try calling startTextEntryMode directly like lat_long_viewer does
-            # startTextEntryMode returns an EventFunc which we then invoke
+            # Load and call the custom Mu dialog module
+            rv.runtime.eval("require notes_dialog; notes_dialog.showNoteDialog();", [])
+        except Exception as e:
+            extra_commands.displayFeedback(f"Note dialog failed: {e}", 3.0)
+            print(f"NotesOverlay: Dialog error - {e}")
+
+    def _open_note_dialog_legacy(self, event):
+        """
+        Legacy: Open note input using RV's native text entry mode.
+
+        This is the old method that uses RV's built-in startTextEntryMode.
+        Kept as fallback but not used by default because:
+        - No copy/paste support
+        - Single line only
+        - Easy to accidentally close and lose input
+        """
+        self._pending_note_frame = commands.frame()
+
+        try:
             mu_code = 'rvui.startTextEntryMode(\\: (string;) { "Enter note: "; }, \\: (void; string t) { commands.sendInternalEvent("notes-overlay-text-entered", t, ""); }, false)(nil);'
             rv.runtime.eval(mu_code, [])
             extra_commands.displayFeedback("Type note and press Enter...", 2.0)
@@ -86,7 +152,7 @@ class NotesOverlayMode(MinorMode):
 
     def _on_text_entered(self, event):
         """
-        Handle the internal event when text is entered via RV's text entry mode.
+        Handle the internal event when text is entered via note dialog.
 
         Args:
             event: The internal event containing the entered text.

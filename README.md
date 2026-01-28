@@ -5,6 +5,7 @@
 ## ✨ Features
 
 - **Quick Notes** — Add notes via `Review > Add Note` menu or `Shift+N` hotkey
+- **Multi-line Input** — Full text editor dialog with copy/paste support (Cmd+C/V)
 - **Clear Text** — White text with black outline readable on any background
 - **Smart Wrapping** — Long text automatically wraps to fit within frame
 - **Stacking** — Multiple notes per frame stack vertically
@@ -16,7 +17,7 @@
 
 ### Quick Install (recommended)
 
-1. Download `NotesOverlay-1.0.rvpkg` from this repository
+1. Download the latest `.rvpkg` from this repository
 2. In RV: `Preferences > Packages > Add Package...`
 3. Select the downloaded `.rvpkg` file
 4. Restart RV
@@ -26,23 +27,25 @@
 ```bash
 # macOS
 ln -s /path/to/NotesOverlay.py ~/Library/Application\ Support/RV/Python/
+ln -s /path/to/notes_dialog.mu ~/Library/Application\ Support/RV/Mu/
 
 # Linux
 ln -s /path/to/NotesOverlay.py ~/.rv/Python/
+ln -s /path/to/notes_dialog.mu ~/.rv/Mu/
 ```
 
 ### Build from Source
 
 ```bash
-zip -r NotesOverlay-1.0.rvpkg PACKAGE NotesOverlay.py
+zip -r NotesOverlay.rvpkg PACKAGE NotesOverlay.py notes_dialog.mu
 ```
 
 ## 📖 Usage
 
 1. Navigate to the frame you want to annotate
 2. Press `Shift+N` or use `Review > Add Note`
-3. Type your note in the prompt at the bottom of the screen
-4. Press `Enter` to add the note
+3. Type your note in the dialog (multi-line supported, copy/paste works)
+4. Click "Add Note" to save, or "Cancel" to discard
 
 Notes appear in the top-left of the image with a bullet point prefix.
 

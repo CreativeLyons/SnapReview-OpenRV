@@ -1,0 +1,123 @@
+//
+// NotesOverlay - Custom Note Input Dialog
+// ========================================
+// Multi-line note input with full copy/paste support for OpenRV.
+//
+// This module creates a Qt-based dialog using RV's Mu Qt bindings.
+// It provides a proper text editor (QTextEdit) instead of RV's limited
+// native text entry mode.
+//
+// KEY LEARNINGS FOR RV MU DEVELOPMENT:
+// ------------------------------------
+// 1. QPushButton.clicked signal passes a `bool checked` parameter.
+//    Callbacks MUST have signature: (void; bool checked)
+//    NOT: (void;) - this will cause silent failures!
+//
+// 2. Closures don't work in Mu callbacks. You cannot reference local
+//    variables from the enclosing function scope. Use module-level
+//    globals instead.
+//
+// 3. Widget constructors vary:
+//    - QLabel(text, parent, flags) - requires all 3 args
+//    - QPushButton(text, parent) - 2 args
+//    - QTextEdit(parent) - 1 arg
+//    - QVBoxLayout(parent) or QVBoxLayout() - optional parent
+//    - QHBoxLayout() - no args, use addLayout to add to parent
+//
+// 4. Use sendInternalEvent() to communicate back to Python code.
+//    Python binds the event name in MinorMode.__init__().
+//
+// 5. QDialog.exec() returns 1 for Accepted, 0 for Rejected.
+//
+// 6. connect(widget, Signal.name, callbackFunction) - 3 args only.
+//    The callback must be a named function, not an inline lambda
+//    that references outer scope variables.
+//
+// 7. QShortcut/QKeySequence may not be available in Mu's Qt bindings.
+//    Stick with buttons for reliable cross-platform behavior.
+//
+
+module: notes_dialog {
+
+use qt;
+use commands;
+
+// Global references for callbacks (required - closures don't work in Mu)
+QDialog _dlg;
+QTextEdit _txt;
+
+// Callback for Add Note button
+// NOTE: Must accept `bool checked` parameter from QPushButton.clicked signal!
+\: doAccept (void; bool checked) { _dlg.accept(); }
+
+// Callback for Cancel button
+\: doReject (void; bool checked) { _dlg.reject(); }
+
+// Main entry point - called from Python via rv.runtime.eval()
+\: showNoteDialog (void;)
+{
+    // Get RV's main window as parent for proper window management
+    QWidget parent = mainWindowWidget();
+
+    // Create modal dialog
+    _dlg = QDialog(parent);
+    _dlg.setWindowTitle("Add Note");
+
+    // Flexible size with reasonable defaults
+    _dlg.resize(500, 95);
+
+    // Vertical layout for dialog contents (tight margins)
+    QVBoxLayout layout = QVBoxLayout(_dlg);
+    layout.setContentsMargins(8, 8, 8, 8);
+    layout.setSpacing(6);
+
+    // Multi-line text editor (plain text only, ~2 visible lines)
+    _txt = QTextEdit(_dlg);
+    _txt.setAcceptRichText(false);  // Strip formatting on paste
+    _txt.setFixedHeight(45);        // ~2 lines of text
+    _txt.setPlaceholderText("Type your note here...");
+    layout.addWidget(_txt);
+
+    // Compact button row
+    QHBoxLayout btnRow = QHBoxLayout();
+    btnRow.addStretch(1);
+
+    QPushButton cancelBtn = QPushButton("Cancel", _dlg);
+    cancelBtn.setFixedHeight(24);
+    btnRow.addWidget(cancelBtn);
+
+    QPushButton addBtn = QPushButton("Add", _dlg);
+    addBtn.setFixedHeight(24);
+    addBtn.setDefault(true);
+    btnRow.addWidget(addBtn);
+
+    layout.addLayout(btnRow);
+
+    connect(addBtn, QPushButton.clicked, doAccept);
+    connect(cancelBtn, QPushButton.clicked, doReject);
+
+    // Position dialog: bottom of parent window, horizontally centered
+    // Use frameGeometry to include window decorations
+    QRect parentGeo = parent.frameGeometry();
+    int dialogHeight = _dlg.sizeHint().height();
+    int dialogX = parentGeo.x() + (parentGeo.width() - 500) / 2;
+    int dialogY = parentGeo.y() + parentGeo.height() - dialogHeight - 100;
+    _dlg.move(dialogX, dialogY);
+
+    // Show dialog and wait for result
+    // Returns 1 (QDialog.Accepted) or 0 (QDialog.Rejected)
+    int result = _dlg.exec();
+
+    // Only send text if user clicked Add
+    if (result == 1)
+    {
+        string text = _txt.toPlainText();
+        if (text != "")
+        {
+            // Send event to Python handler
+            sendInternalEvent("notes-overlay-text-entered", text, "");
+        }
+    }
+}
+
+} // end module notes_dialog
