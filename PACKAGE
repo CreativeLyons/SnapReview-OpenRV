@@ -1,0 +1,15 @@
+package: NotesOverlay
+author: Tony Lyons
+version: 1.0
+rv: 3.0
+requires: ''
+
+modes:
+  - file: NotesOverlay
+    load: immediate
+
+description: |
+  Review notes overlay plugin for OpenRV.
+  Adds Review > Add Note menu for adding text annotations to frames.
+  Notes are rendered as white text with black outline for readability.
+  Notes persist in RVPaint node properties (survives session save/autosave).

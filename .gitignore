@@ -17,7 +17,6 @@ build/
 eggs/
 *.manifest
 *.spec
-*.rvpkg
 
 # IDE / editor
 .idea/
