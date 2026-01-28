@@ -164,4 +164,4 @@ Open RV is the open-source version of RV, the Sci-Tech award–winning media rev
 
 See [LICENSE](LICENSE) if present.
 
-Video by RDNE Stock project: https://www.pexels.com/video/astronauts-exploring-together-8474587/
+Video by RDNE Stock project: https://www.pexels.com/video/overhead-shot-of-astronauts-walking-in-an-outdoor-area-8474580/
