@@ -36,15 +36,79 @@
 // 7. QShortcut/QKeySequence may not be available in Mu's Qt bindings.
 //    Stick with buttons for reliable cross-platform behavior.
 //
+// 8. Subclassing QDialog to override keyPressEvent:
+//    - Use `class: ClassName : ParentClass { ... }` syntax
+//    - Constructor calls parent via `QDialog.QDialog(this, parent)`
+//    - Override methods with `method: methodName (returnType; params) { ... }`
+//    - Call parent method via `QDialog.keyPressEvent(this, event)`
+//
+// 9. Subclassing QTextEdit to override keyPressEvent:
+//    - keyPressEvent receives QKeyEvent directly (no casting needed)
+//    - IMPORTANT: Store parent dialog as class member variable
+//    - Module-level globals can't be accessed from class methods
+//    - Call parent method via QTextEdit.keyPressEvent(this, event)
+//
+// 10. Key constants: Qt.Key_Return (main Enter), Qt.Key_Enter (numpad)
+//     Modifier check: (event.modifiers() & Qt.ShiftModifier) != 0
+//
 
 module: notes_dialog {
 
 use qt;
 use commands;
 
+// -----------------------------------------------------------------------------
+// NoteTextEdit - Custom QTextEdit with Slack-style Enter behavior
+// -----------------------------------------------------------------------------
+// Subclasses QTextEdit to override keyPressEvent:
+// - Enter (without Shift) = submit dialog
+// - Shift+Enter = insert newline (default behavior)
+// - Ctrl+Enter = also submit (backup shortcut)
+
+class: NoteTextEdit : QTextEdit
+{
+    // Store reference to parent dialog for accept() call
+    QDialog _parentDialog;
+
+    // Constructor - initialize parent QTextEdit and store dialog reference
+    method: NoteTextEdit (NoteTextEdit; QDialog dialog)
+    {
+        QTextEdit.QTextEdit(this, dialog);
+        _parentDialog = dialog;
+    }
+
+    // Override keyPressEvent to intercept Enter key
+    method: keyPressEvent (void; QKeyEvent event)
+    {
+        int key = event.key();
+        int mods = event.modifiers();
+
+        // Check for Enter/Return key
+        if (key == Qt.Key_Return || key == Qt.Key_Enter)
+        {
+            // Shift+Enter = let through for newline
+            if ((mods & Qt.ShiftModifier) != 0)
+            {
+                QTextEdit.keyPressEvent(this, event);
+                return;
+            }
+
+            // Enter (or Ctrl+Enter) = submit dialog
+            _parentDialog.accept();
+            return;
+        }
+
+        // All other keys: pass to parent
+        QTextEdit.keyPressEvent(this, event);
+    }
+}
+
 // Global references for callbacks (required - closures don't work in Mu)
 QDialog _dlg;
-QTextEdit _txt;
+NoteTextEdit _txt;
+
+// Module-level function to accept dialog (callable from event filter)
+\: acceptDialog (void;) { _dlg.accept(); }
 
 // Callback for Add Note button
 // NOTE: Must accept `bool checked` parameter from QPushButton.clicked signal!
@@ -71,11 +135,12 @@ QTextEdit _txt;
     layout.setContentsMargins(8, 8, 8, 8);
     layout.setSpacing(6);
 
-    // Multi-line text editor (plain text only, ~2 visible lines)
-    _txt = QTextEdit(_dlg);
+    // Multi-line text editor with Slack-style Enter behavior
+    // Uses custom NoteTextEdit subclass that overrides keyPressEvent
+    _txt = NoteTextEdit(_dlg);
     _txt.setAcceptRichText(false);  // Strip formatting on paste
     _txt.setFixedHeight(45);        // ~2 lines of text
-    _txt.setPlaceholderText("Type your note here...");
+    _txt.setPlaceholderText("Type your note... (Enter to add, Shift+Enter for new line)");
     layout.addWidget(_txt);
 
     // Compact button row
