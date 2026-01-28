@@ -85,6 +85,9 @@ class NotesOverlayMode(MinorMode):
             # Global key bindings: (event, callback, description)
             [
                 ("key-down--N", self.open_note_dialog, "Add note to current frame"),
+                # Ctrl+Shift+C (Windows/Linux) and Cmd+Shift+C (macOS)
+                ("key-down--control--C", self.copy_notes_to_clipboard, "Copy notes to clipboard"),
+                ("key-down--meta--C", self.copy_notes_to_clipboard, "Copy notes to clipboard"),
                 # Internal event for receiving text from Mu dialog
                 ("notes-overlay-text-entered", self._on_text_entered, "Handle entered note text"),
             ],
@@ -93,6 +96,7 @@ class NotesOverlayMode(MinorMode):
             [
                 ("Review", [
                     ("Add Note", self.open_note_dialog, "N", None),
+                    ("Copy Notes to Clipboard", self.copy_notes_to_clipboard, "C", None),
                 ]),
             ],
         )
@@ -617,6 +621,407 @@ class NotesOverlayMode(MinorMode):
             note_text: The text content of the note.
         """
         self._add_note_to_frame(note_text, commands.frame())
+
+    # -------------------------------------------------------------------------
+    # Copy Notes to Clipboard
+    # -------------------------------------------------------------------------
+
+    def copy_notes_to_clipboard(self, event):
+        """
+        Copy all notes from current source to clipboard.
+
+        Gathers notes from all annotated frames (including RV native annotations),
+        deduplicates, unwraps line breaks, formats chronologically by source frame,
+        and copies to clipboard.
+
+        Supports:
+        - Our plugin's notes (text:*:*:note elements)
+        - RV native text annotations (text:* elements)
+        - Drawing-only frames (shows "See annotated frame" placeholder)
+        """
+        import os
+
+        # Mark all annotated frames first (ensures native annotations are marked)
+        # This invokes RV's "Edit > Mark Annotated Frames" menu action via Mu
+        try:
+            rv.runtime.eval("require rvui; rvui.markAnnotatedFrames();", [])
+        except Exception as e:
+            # Non-critical - frames may already be marked or function unavailable
+            print(f"NotesOverlay: markAnnotatedFrames failed (non-critical): {e}")
+
+        # Get current source
+        current_frame = commands.frame()
+        sources = commands.sourcesAtFrame(current_frame)
+
+        if not sources:
+            extra_commands.displayFeedback("No source at current frame", 2.0)
+            return
+
+        source = sources[0]
+
+        # Get paint node for this source
+        source_group = commands.nodeGroup(source)
+        paint_nodes = extra_commands.nodesInGroupOfType(source_group, "RVPaint")
+
+        if not paint_nodes:
+            extra_commands.displayFeedback("See annotation - no text notes found", 2.0)
+            return
+
+        source_paint_node = paint_nodes[0]
+
+        # Find the sequence paint node for native RV annotations
+        # Native annotations are stored on "defaultSequence_p_{sourceGroup}" nodes
+        sequence_paint_node = None
+        try:
+            all_paint_nodes = commands.nodesOfType("RVPaint")
+            # Look for sequence paint node matching this source
+            source_id = source_group.replace("sourceGroup", "")  # e.g., "000000"
+            for pn in all_paint_nodes:
+                if f"_p_sourceGroup{source_id}" in pn or f"_p_{source_group}" in pn:
+                    sequence_paint_node = pn
+                    break
+        except Exception as e:
+            print(f"NotesOverlay: Error finding sequence paint node: {e}")
+
+        # Get frames from source paint node (our notes - source frame numbers)
+        annotated_frames = self.get_annotated_frames(source_paint_node)
+
+        # Get frames from sequence paint node (native annotations - global frame numbers)
+        native_frames = []
+        if sequence_paint_node:
+            native_frames = self.get_annotated_frames(sequence_paint_node)
+
+        # Combine both frame lists (they use different numbering, will handle in gathering)
+        all_annotated_frames = sorted(set(annotated_frames) | set(native_frames))
+
+        if not all_annotated_frames:
+            extra_commands.displayFeedback("No annotations found", 2.0)
+            return
+
+        # Gather notes for each frame from BOTH paint nodes
+        # Note: source paint node uses source frames, sequence paint node uses global frames
+        frame_notes = {}  # frame -> list of texts
+        drawing_only_frames = set()  # frames with only drawings (no text)
+
+        # Process source paint node frames (our plugin notes)
+        for frame in annotated_frames:
+            texts, has_drawings = self.get_notes_for_frame(source_paint_node, frame)
+            if texts:
+                if frame not in frame_notes:
+                    frame_notes[frame] = []
+                frame_notes[frame].extend(texts)
+            elif has_drawings:
+                drawing_only_frames.add(frame)
+
+        # Process sequence paint node frames (native RV annotations)
+        # These use global frame numbers - convert to source frame for display
+        if sequence_paint_node:
+            for global_frame in native_frames:
+                # Convert global frame to source frame for consistent display
+                try:
+                    src_frame = extra_commands.sourceFrame(global_frame)
+                except Exception:
+                    src_frame = global_frame
+
+                texts, has_drawings = self.get_notes_for_frame(sequence_paint_node, global_frame)
+                if texts:
+                    if src_frame not in frame_notes:
+                        frame_notes[src_frame] = []
+                    frame_notes[src_frame].extend(texts)
+                elif has_drawings:
+                    drawing_only_frames.add(src_frame)
+
+        if not frame_notes and not drawing_only_frames:
+            extra_commands.displayFeedback("No annotations found", 2.0)
+            return
+
+        # Get source filename and path for export
+        try:
+            info = commands.sourceMediaInfo(source)
+            source_path = info.get("file", "")
+            source_name = os.path.basename(source_path) if source_path else source
+        except Exception:
+            source_path = ""
+            source_name = source
+
+        # Format output (pass drawing_only_frames for placeholder handling)
+        output_text = self.format_notes_for_export(
+            source_name, source_path, frame_notes, drawing_only_frames
+        )
+
+        # Copy to clipboard via Mu
+        try:
+            # Escape special characters for Mu string literal
+            escaped_text = output_text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+            mu_code = f'require clipboard; clipboard.copyText("{escaped_text}");'
+            rv.runtime.eval(mu_code, [])
+
+            # Count total annotations for feedback
+            total_notes = sum(len(notes) for notes in frame_notes.values())
+            total_frames = len(frame_notes) + len(drawing_only_frames)
+            drawing_suffix = f" + {len(drawing_only_frames)} drawings" if drawing_only_frames else ""
+            extra_commands.displayFeedback(
+                f"Notes copied! ({total_notes} notes from {total_frames} frames{drawing_suffix})",
+                2.5
+            )
+
+        except Exception as e:
+            extra_commands.displayFeedback("Failed to copy to clipboard", 2.0)
+            print(f"NotesOverlay: Clipboard error - {e}")
+
+    def get_annotated_frames(self, paint_node):
+        """
+        Get all frames with ANY paint elements for a given paint node.
+
+        Scans the paint node properties for frame order entries and extracts
+        unique frame numbers that have any annotations (text, strokes, shapes, etc.).
+
+        Filters out our shadow elements (shadow0-7) which are just outline effects.
+
+        Args:
+            paint_node: The RVPaint node name to scan.
+
+        Returns:
+            list: Sorted list of frame numbers with annotations.
+        """
+        frames = set()
+
+        # Shadow labels to skip (our outline effect elements)
+        shadow_labels = {f":shadow{i}" for i in range(8)}
+
+        try:
+            # Get all properties on the paint node
+            properties = commands.properties(paint_node)
+
+            # Look for frame order properties (e.g., "node.frame:123.order")
+            for prop in properties:
+                if ".order" in prop:
+                    # Extract frame number from property name
+                    # Format: "paintNode.frame:{frame}.order"
+                    parts = prop.split(".")
+                    for part in parts:
+                        if part.startswith("frame:"):
+                            try:
+                                frame_num = int(part.split(":")[1])
+                                # Check if frame has any real elements (not just shadows)
+                                order_data = commands.getStringProperty(prop)
+                                for element in order_data:
+                                    # Skip shadow elements (our outline effect)
+                                    is_shadow = any(element.endswith(s) for s in shadow_labels)
+                                    if not is_shadow:
+                                        frames.add(frame_num)
+                                        break
+                            except (ValueError, IndexError):
+                                pass
+
+        except Exception as e:
+            print(f"NotesOverlay: Error getting annotated frames: {e}")
+
+        return sorted(frames)
+
+    def get_notes_for_frame(self, paint_node, frame):
+        """
+        Get all text annotations and detect non-text content for a frame.
+
+        Reads all paint elements from the paint node:
+        - Extracts text from any element with a .text property
+        - Detects non-text annotations (strokes, lines, shapes)
+        - Filters out shadow elements (our outline effect)
+        - Deduplicates by exact text match
+
+        Args:
+            paint_node: The RVPaint node name.
+            frame: The frame number (source frame for our notes, global for native).
+
+        Returns:
+            tuple: (list of text strings, bool has_drawings)
+                - texts: List of unique note/text strings
+                - has_drawings: True if frame has non-text elements (strokes, shapes)
+        """
+        texts = []
+        seen_texts = set()
+        has_drawings = False
+
+        # Shadow labels to skip (our outline effect elements)
+        shadow_labels = {f":shadow{i}" for i in range(8)}
+
+        # Element types that are drawing-based (non-text)
+        drawing_types = {"stroke", "line", "rect", "circle", "pen", "arrow"}
+
+        try:
+            order_prop = f"{paint_node}.frame:{frame}.order"
+
+            if commands.propertyExists(order_prop):
+                order_data = commands.getStringProperty(order_prop)
+
+                for element in order_data:
+                    # Skip shadow elements (our outline effect)
+                    is_shadow = any(element.endswith(s) for s in shadow_labels)
+                    if is_shadow:
+                        continue
+
+                    # Parse element type from format: "type:id:frame:label"
+                    element_type = element.split(":")[0] if ":" in element else ""
+
+                    # Check for text content (text elements have .text property)
+                    text_prop = f"{paint_node}.{element}.text"
+                    if commands.propertyExists(text_prop):
+                        note_text = commands.getStringProperty(text_prop)[0]
+                        if note_text and note_text.strip():
+                            # Deduplicate by exact text match
+                            if note_text not in seen_texts:
+                                seen_texts.add(note_text)
+                                texts.append(note_text)
+                    elif element_type in drawing_types:
+                        # Non-text element (stroke, line, shape, etc.)
+                        has_drawings = True
+
+        except Exception as e:
+            print(f"NotesOverlay: Error reading notes for frame {frame}: {e}")
+
+        return (texts, has_drawings)
+
+    def unwrap_note(self, text):
+        """
+        Restore original note text by removing display formatting.
+
+        Removes the bullet prefix and line breaks that were added for
+        on-screen display, returning the original user-entered text.
+
+        Args:
+            text: The wrapped note text (may or may not have bullet prefix).
+
+        Returns:
+            str: The original unwrapped text (without bullet prefix).
+        """
+        # Strip leading bullet prefix (our notes are stored as "- text")
+        if text.startswith("- "):
+            text = text[2:]
+
+        # Replace newlines with single space (undo line wrapping)
+        text = text.replace("\n", " ")
+
+        # Collapse multiple spaces to single space
+        while "  " in text:
+            text = text.replace("  ", " ")
+
+        # Strip leading/trailing whitespace
+        return text.strip()
+
+    def normalize_note(self, text):
+        """
+        Normalize a note for export by unwrapping and ensuring dash prefix.
+
+        Unwraps the text (removes line breaks) and ensures it has a
+        consistent `- ` prefix for uniform formatting in export.
+
+        Args:
+            text: The raw note text from RVPaint.
+
+        Returns:
+            str: Normalized text with `- ` prefix.
+        """
+        # First unwrap the text
+        unwrapped = self.unwrap_note(text)
+
+        # Ensure it has a dash prefix
+        if not unwrapped.startswith("-"):
+            return f"- {unwrapped}"
+        else:
+            # Already has dash - ensure proper spacing
+            if unwrapped.startswith("- "):
+                return unwrapped
+            elif unwrapped.startswith("-"):
+                return f"- {unwrapped[1:].strip()}"
+
+        return unwrapped
+
+    def format_notes_for_export(self, source_name, source_path, frame_notes, drawing_only_frames=None):
+        """
+        Format notes for clipboard export.
+
+        Creates a formatted string with:
+        - Header: source name + datetime
+        - Body: frame numbers with notes (compact, no separators)
+        - Footer: source file path
+
+        For frames with only drawings (no text), shows "See annotated frame".
+
+        Args:
+            source_name: The source filename to display in header.
+            source_path: The full file path for footer metadata.
+            frame_notes: Dict mapping frame numbers to lists of note texts.
+            drawing_only_frames: Set of frame numbers with only drawings (optional).
+
+        Returns:
+            str: Formatted notes string ready for clipboard.
+
+        Output format:
+            Notes on shot_010_v002.mov
+            2026-01-28 06:30
+
+            ---
+
+            Frame 1001
+            - First note
+            - Second note
+
+            Frame 1004
+            - Another note
+
+            Frame 1010
+            - See annotated frame
+
+            ---
+
+            /path/to/shot_010_v002.mov
+        """
+        from datetime import datetime
+
+        if drawing_only_frames is None:
+            drawing_only_frames = set()
+
+        lines = []
+
+        # Header: source name + datetime
+        lines.append(f"Notes on {source_name}")
+        lines.append(datetime.now().strftime("%Y-%m-%d %H:%M"))
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+        # Combine all frames (text notes + drawing-only)
+        all_frames = sorted(set(frame_notes.keys()) | drawing_only_frames)
+
+        # Body: frames with notes (blank line between groups, no separators)
+        for i, frame in enumerate(all_frames):
+            # Frame number as section header
+            lines.append(f"Frame {frame}")
+
+            if frame in frame_notes:
+                # Frame has text notes
+                notes = frame_notes[frame]
+                for note in notes:
+                    normalized = self.normalize_note(note)
+                    lines.append(normalized)
+            else:
+                # Drawing-only frame - show placeholder (asterisk prefix to differentiate)
+                lines.append("- *see annotated frame")
+
+            # Blank line between frame groups (but not after last)
+            if i < len(all_frames) - 1:
+                lines.append("")
+
+        # Footer: separator + file path
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+        if source_path:
+            lines.append(source_path)
+        else:
+            lines.append(source_name)
+
+        return "\n".join(lines)
 
 
 # -----------------------------------------------------------------------------

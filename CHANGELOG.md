@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-01-28
+
+### ✨ Added
+
+- **Copy Notes to Clipboard** — New menu item and `Cmd+Shift+C` / `Ctrl+Shift+C` hotkey
+  - Exports all notes from current source in chronological order by frame
+  - Header with source name and timestamp, footer with file path
+  - Markdown-friendly format with bullet points per note
+- **RV Native Annotation Support** — Detects both plugin notes AND RV's native paint annotations
+  - Scans sequence paint nodes for annotations made with RV's built-in tools
+  - Marks annotated frames via `markAnnotatedFrames()` before gathering
+- **Drawing Placeholder** — Frames with only drawings (no text) show `- *see annotated frame`
+
+### 🔧 Technical
+
+- New `clipboard.mu` module for clipboard access via Qt's QApplication.clipboard()
+- Discovered native RV annotations stored on `defaultSequence_p_*` paint nodes (global frames)
+- Added `normalize_note()` helper to ensure consistent `- ` prefix formatting
+- Updated `get_annotated_frames()` and `get_notes_for_frame()` to scan multiple paint nodes
+
 ## [1.2.0] - 2026-01-28
 
 ### ✨ Added

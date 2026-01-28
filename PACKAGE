@@ -11,6 +11,8 @@ modes:
 mu:
   - file: notes_dialog
     load: immediate
+  - file: clipboard
+    load: immediate
 
 description: |
   Review notes overlay plugin for OpenRV.
@@ -23,3 +25,4 @@ description: |
   - Notes stack vertically on the same frame
   - Timeline markers on frames with notes
   - Notes persist in RVPaint node properties (survives session save/autosave)
+  - Copy Notes to Clipboard (Ctrl+Shift+C) exports all notes for current source
