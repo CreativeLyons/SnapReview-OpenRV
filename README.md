@@ -4,6 +4,8 @@
 
 ## ✨ Features
 
+![notesOverlay_RV_02b](https://github.com/user-attachments/assets/6d921c27-d68e-4cc3-bec1-f45059f87e04)
+
 ### Quick Notes:
 
 - Add notes via `SnapReview > Add Note` menu or `Shift+N` hotkey
@@ -17,14 +19,11 @@
 #### Add notes via `SnapReview > Add Note` menu or `Shift+N` hotkey
 ![Menu_01](https://github.com/user-attachments/assets/7cda1f00-c849-42c0-b05d-b796001039d9)
 
-![notesOverlay_RV_01_notes](https://github.com/user-attachments/assets/2e060d15-31a9-4062-b413-56ed29ee749a)
-
 ---
 
 #### Multi-line text input with copy/paste support
-![notesOverlay_RV_01b](https://github.com/user-attachments/assets/65763889-0a46-4006-a9c0-69748a077df8)
 
-![notesOverlay_RV_02b](https://github.com/user-attachments/assets/6d921c27-d68e-4cc3-bec1-f45059f87e04)
+![notesOverlay_RV_01_notes](https://github.com/user-attachments/assets/2e060d15-31a9-4062-b413-56ed29ee749a)
 
 ---
 
