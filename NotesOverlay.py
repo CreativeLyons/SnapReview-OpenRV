@@ -1,7 +1,7 @@
 # -----------------------------------------------------------------------------
-# NotesOverlay - OpenRV Review Notes Plugin
+# SnapReview - OpenRV Review Notes Plugin
 # -----------------------------------------------------------------------------
-# Adds a "Review > Add Note" menu to OpenRV for adding text annotations
+# Adds a "SnapReview > Add Note" menu to OpenRV for adding text annotations
 # to frames. Notes are rendered as white text with a black outline overlay.
 #
 # Notes are stored in RVPaint node properties and persist in session files
@@ -66,7 +66,7 @@ class NotesOverlayMode(MinorMode):
     MinorMode that provides note overlay functionality for OpenRV.
 
     Features:
-    - Review > Add Note menu item (shift+n hotkey)
+    - SnapReview > Add Note menu item (shift+n hotkey)
     - Native RV text entry mode for input (Mu-based)
     - White text with black outline rendered on current frame
     - Notes stored in RVPaint node (persists in session/autosave)
@@ -97,9 +97,9 @@ class NotesOverlayMode(MinorMode):
             None,  # No override bindings
             # Menu structure: (menu_name, [(item_name, callback, hotkey, state_hook), ...])
             [
-                ("Review", [
+                ("SnapReview", [
                     ("Add Note", self.open_note_dialog, "N", None),
-                    ("Copy Notes to Clipboard", self.copy_notes_to_clipboard, "C", None),
+                    ("Copy Notes", self.copy_notes_to_clipboard, "C", None),
                     ("Save Review", self.save_review, "S", None),
                 ]),
             ],
@@ -639,7 +639,7 @@ class NotesOverlayMode(MinorMode):
         - Notes text file ({source}_review_notes.txt)
         - JPG exports of all annotated frames
 
-        Also copies notes to clipboard (same as Copy Notes to Clipboard).
+        Also copies notes to clipboard (same as Copy Notes).
 
         Folder naming: {YYYY-MM-DD_HHMM}_{source_name}-review/
         """
@@ -689,7 +689,28 @@ class NotesOverlayMode(MinorMode):
             original_view = commands.viewNode()
             commands.setViewNode(source_group)
             rv.runtime.eval("require rvui; rvui.clearAllMarks(); rvui.markAnnotatedFrames();", [])
-            has_annotations = len(commands.markedFrames()) > 0
+            marked_frames = commands.markedFrames()
+
+            # Filter out frames with no visible content (empty text elements)
+            # RV marks frames with any paint element, including empty ones
+            has_annotations = False
+            paint_nodes = extra_commands.nodesInGroupOfType(source_group, "RVPaint")
+            if paint_nodes and marked_frames:
+                source_paint_node = paint_nodes[0]
+                for frame in marked_frames:
+                    texts, has_drawings = self.get_notes_for_frame(source_paint_node, frame)
+                    # Filter blank texts using the same logic as normalize_note
+                    valid_texts = [t for t in texts if self.normalize_note(t)]
+                    if valid_texts or has_drawings:
+                        has_annotations = True
+                    else:
+                        # Frame has only empty text elements - clean them up
+                        self._clean_empty_paint_elements(source_paint_node, frame)
+
+            # Re-mark after cleanup so timeline reflects accurate state
+            if has_annotations:
+                rv.runtime.eval("require rvui; rvui.clearAllMarks(); rvui.markAnnotatedFrames();", [])
+
             commands.setViewNode(original_view)
         except Exception:
             has_annotations = False
@@ -770,7 +791,7 @@ class NotesOverlayMode(MinorMode):
         # ---------------------------------------------------------------------
         if exported_count > 0 or notes_text:
             extra_commands.displayFeedback(
-                f"Saved {exported_count} Annotated Frames + Copied Notes to Clipboard",
+                f"Review saved: {exported_count} annotated frames, notes copied",
                 3.0
             )
         else:
@@ -909,9 +930,9 @@ class NotesOverlayMode(MinorMode):
         """
         import os
 
-        # Mark all annotated frames first (ensures native annotations are marked)
+        # Clear stale marks and re-mark annotated frames (ensures accurate state)
         try:
-            rv.runtime.eval("require rvui; rvui.markAnnotatedFrames();", [])
+            rv.runtime.eval("require rvui; rvui.clearAllMarks(); rvui.markAnnotatedFrames();", [])
         except Exception:
             pass  # Non-critical
 
@@ -1050,6 +1071,31 @@ class NotesOverlayMode(MinorMode):
             print(f"NotesOverlay: Could not get marked frames - {e}")
             marked_frames = []
 
+        # Filter out frames with no visible content (empty text elements)
+        # RV marks frames with any paint element, including empty ones
+        paint_nodes = extra_commands.nodesInGroupOfType(source_group, "RVPaint")
+        if paint_nodes and marked_frames:
+            source_paint_node = paint_nodes[0]
+            valid_frames = []
+            for frame in marked_frames:
+                texts, has_drawings = self.get_notes_for_frame(source_paint_node, frame)
+                # Filter blank texts using the same logic as normalize_note
+                valid_texts = [t for t in texts if self.normalize_note(t)]
+                if valid_texts or has_drawings:
+                    valid_frames.append(frame)
+                else:
+                    # Frame has only empty text elements - clean them up
+                    self._clean_empty_paint_elements(source_paint_node, frame)
+            marked_frames = valid_frames
+
+            # Clear RV marks and re-mark only valid frames
+            try:
+                rv.runtime.eval("require rvui; rvui.clearAllMarks();", [])
+                for frame in valid_frames:
+                    commands.markFrame(frame, True)
+            except Exception as e:
+                print(f"NotesOverlay: Could not update marks - {e}")
+
         exported_count = 0
 
         if marked_frames:
@@ -1095,7 +1141,7 @@ class NotesOverlayMode(MinorMode):
         return exported_count
 
     # -------------------------------------------------------------------------
-    # Copy Notes to Clipboard
+    # Copy Notes
     # -------------------------------------------------------------------------
 
     def copy_notes_to_clipboard(self, event):
@@ -1113,10 +1159,10 @@ class NotesOverlayMode(MinorMode):
         """
         import os
 
-        # Mark all annotated frames first (ensures native annotations are marked)
+        # Clear stale marks and re-mark annotated frames (ensures accurate state)
         # This invokes RV's "Edit > Mark Annotated Frames" menu action via Mu
         try:
-            rv.runtime.eval("require rvui; rvui.markAnnotatedFrames();", [])
+            rv.runtime.eval("require rvui; rvui.clearAllMarks(); rvui.markAnnotatedFrames();", [])
         except Exception as e:
             # Non-critical - frames may already be marked or function unavailable
             print(f"NotesOverlay: markAnnotatedFrames failed (non-critical): {e}")
@@ -1291,6 +1337,89 @@ class NotesOverlayMode(MinorMode):
 
         return sorted(frames)
 
+    def _clean_empty_paint_elements(self, paint_node, frame):
+        """
+        Remove empty text elements from a frame's paint data.
+
+        RV's native text tool can create text elements with no content.
+        These cause the frame to be marked as "annotated" even though
+        nothing is visible. This method clears those empty elements using
+        RV's native "Clear Drawings" action.
+
+        Only removes elements if the frame has NO valid content (no text,
+        no drawings). If there's any real annotation, leaves everything.
+
+        Args:
+            paint_node: The RVPaint node name.
+            frame: The frame number to clean.
+
+        Returns:
+            bool: True if elements were deleted, False otherwise.
+        """
+        shadow_labels = {f":shadow{i}" for i in range(8)}
+        drawing_types = {"stroke", "line", "rect", "circle", "pen", "arrow"}
+
+        try:
+            order_prop = f"{paint_node}.frame:{frame}.order"
+
+            if not commands.propertyExists(order_prop):
+                return False
+
+            order_data = commands.getStringProperty(order_prop)
+            if not order_data:
+                return False
+
+            has_valid_content = False
+            empty_text_elements = []
+
+            for element in order_data:
+                # Skip shadow elements
+                is_shadow = any(element.endswith(s) for s in shadow_labels)
+                if is_shadow:
+                    continue
+
+                element_type = element.split(":")[0] if ":" in element else ""
+
+                # Check for text content
+                text_prop = f"{paint_node}.{element}.text"
+                if commands.propertyExists(text_prop):
+                    note_text = commands.getStringProperty(text_prop)[0]
+                    if note_text and note_text.strip():
+                        has_valid_content = True
+                    else:
+                        # Empty text element
+                        empty_text_elements.append(element)
+                elif element_type in drawing_types:
+                    has_valid_content = True
+
+            # Only clear if there's NO valid content
+            if has_valid_content or not empty_text_elements:
+                return False
+
+            # Navigate to the frame and use RV's native clear action
+            try:
+                # Save current frame
+                original_frame = commands.frame()
+
+                # Go to the frame with empty annotations
+                commands.setFrame(frame)
+
+                # Trigger RV's "Clear Drawings" action for current frame
+                # This is the internal event bound to Annotations > Clear Drawings
+                commands.sendInternalEvent("clear-annotations-current-frame", "", "")
+
+                # Return to original frame
+                commands.setFrame(original_frame)
+
+                return True
+            except Exception as e:
+                print(f"NotesOverlay: Could not clear empty paint elements - {e}")
+                return False
+
+        except Exception as e:
+            print(f"NotesOverlay: Error cleaning paint elements for frame {frame}: {e}")
+            return False
+
     def get_notes_for_frame(self, paint_node, frame):
         """
         Get all text annotations and detect non-text content for a frame.
@@ -1391,20 +1520,28 @@ class NotesOverlayMode(MinorMode):
             text: The raw note text from RVPaint.
 
         Returns:
-            str: Normalized text with `- ` prefix.
+            str: Normalized text with `- ` prefix, or None if note is blank.
         """
         # First unwrap the text
         unwrapped = self.unwrap_note(text)
+
+        # Filter out blank notes (empty or whitespace-only after unwrapping)
+        if not unwrapped:
+            return None
 
         # Ensure it has a dash prefix
         if not unwrapped.startswith("-"):
             return f"- {unwrapped}"
         else:
             # Already has dash - ensure proper spacing
+            content_after_dash = unwrapped[1:].strip() if len(unwrapped) > 1 else ""
+            # If only a dash with no content, treat as blank
+            if not content_after_dash:
+                return None
             if unwrapped.startswith("- "):
                 return unwrapped
-            elif unwrapped.startswith("-"):
-                return f"- {unwrapped[1:].strip()}"
+            else:
+                return f"- {content_after_dash}"
 
         return unwrapped
 
@@ -1479,9 +1616,15 @@ class NotesOverlayMode(MinorMode):
             if frame in frame_notes:
                 # Frame has text notes
                 notes = frame_notes[frame]
+                valid_notes = []
                 for note in notes:
                     normalized = self.normalize_note(note)
-                    lines.append(normalized)
+                    if normalized:  # Skip blank notes (normalize_note returns None)
+                        valid_notes.append(normalized)
+                        lines.append(normalized)
+                # If all notes were blank, treat as drawing-only
+                if not valid_notes:
+                    lines.append("- *see annotated frame")
             else:
                 # Drawing-only frame - show placeholder (asterisk prefix to differentiate)
                 lines.append("- *see annotated frame")

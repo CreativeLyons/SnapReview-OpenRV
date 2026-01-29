@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-01-29
+
+### 🔄 Changed
+
+- **Renamed to SnapReview** — Product renamed from NotesOverlay to SnapReview
+  - RV menu now displays as `SnapReview` instead of `Review`
+  - Menu items: `Add Note`, `Copy Notes`, `Save Review`
+  - Package renamed to `SnapReview.rvpkg`
+  - All documentation updated to reflect new branding
+  - Python module remains `NotesOverlay.py` (internal implementation)
+- **Save Review Message** — Updated feedback to `Review saved: X annotated frames, notes copied`
+
+### 🐞 Fixed
+
+- **Empty Text Elements** — Fixed issue where clicking RV's text tool without typing would:
+  - Mark frames as "annotated" even though nothing was visible
+  - Export blank frames during Save Review
+  - Show empty dashes in copied notes
+- **Blank Note Filtering** — `normalize_note()` now returns `None` for blank notes
+  - Notes that are empty or contain only dashes are excluded from export
+  - Frames with only blank notes show `*see annotated frame` placeholder
+- **Stale Marks Cleanup** — Added `clearAllMarks()` before `markAnnotatedFrames()` at all entry points
+  - Ensures timeline reflects accurate annotation state
+- **Empty Paint Element Cleanup** — New `_clean_empty_paint_elements()` method
+  - Detects frames with only empty text elements (no valid text, no drawings)
+  - Uses RV's native `clear-annotations-current-frame` event to remove them
+  - Cleans up automatically during Save Review
+
+### 🔧 Technical
+
+- Uses `commands.sendInternalEvent("clear-annotations-current-frame", "", "")` to invoke RV's native clear
+- Filters marked frames before export to exclude empty-only frames
+- Re-marks only valid frames using `commands.markFrame()` after filtering
+
 ## [1.4.0] - 2026-01-29
 
 ### ✨ Added
@@ -14,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Exports RV session file (`{source}-review_session.rv`)
   - Exports notes to text file (`{source}_review_notes.txt`)
   - Exports annotated frames as JPGs in `frames/` subfolder with zero-padded frame numbers
-  - Copies notes to clipboard (same as Copy Notes to Clipboard)
+  - Copies notes to clipboard (same as Copy Notes)
 - **Source Isolation** — Automatically switches to current source view before export
   - Only exports annotations from the source you're standing on
   - Frame numbers are source-relative, not timeline-relative
@@ -50,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### ✨ Added
 
-- **Copy Notes to Clipboard** — New menu item and `Cmd+Shift+C` / `Ctrl+Shift+C` hotkey
+- **Copy Notes** — New menu item and `Cmd+Shift+C` / `Ctrl+Shift+C` hotkey
   - Exports all notes from current source in chronological order by frame
   - Header with source name and timestamp, footer with file path
   - Markdown-friendly format with bullet points per note
@@ -112,8 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### ✨ Added
 
-- **NotesOverlay plugin** — Text annotation overlay for OpenRV
-  - `Review > Add Note` menu item with `Shift+N` hotkey
+- **SnapReview plugin** — Text annotation overlay for OpenRV
+  - `SnapReview > Add Note` menu item with `Shift+N` hotkey
   - White text with black outline for readability on any background
   - Smart text wrapping with configurable line length
   - Vertical stacking of multiple notes per frame
@@ -132,5 +166,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial `.gitignore` for Python, IDE, and build artifacts
 - `PACKAGE` manifest for OpenRV package distribution
-- Pre-built `NotesOverlay.rvpkg` ready for download
+- Pre-built `SnapReview.rvpkg` ready for download
 - Documentation and changelog structure

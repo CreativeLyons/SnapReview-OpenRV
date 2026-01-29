@@ -1,5 +1,5 @@
 //
-// NotesOverlay - Custom Note Input Dialog
+// SnapReview - Custom Note Input Dialog
 // ========================================
 // Multi-line note input with full copy/paste support for OpenRV.
 //
