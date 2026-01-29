@@ -1,4 +1,4 @@
-# NotesOverlay Development Notes
+# SnapReview Development Notes
 
 This document captures key learnings, decisions, and work-in-progress for AI agents and developers working on this project.
 
@@ -98,6 +98,47 @@ class: NoteTextEdit : QTextEdit
 | QShortcut/QKeySequence | May not be exposed | Avoided, using keyPressEvent instead |
 | Closures in Mu callbacks | Silent failures | Use module globals |
 
+## Copy Notes / Export Feature Learnings
+
+### Note Sources
+The plugin gathers notes from two paint nodes:
+1. **Source paint node** — Our plugin's notes (stored with `:note` label suffix)
+2. **Sequence paint node** — RV's native text annotations (format: `_p_sourceGroup{id}`)
+
+```python
+# Find sequence paint node for native annotations
+all_paint_nodes = commands.nodesOfType("RVPaint")
+source_id = source_group.replace("sourceGroup", "")
+for pn in all_paint_nodes:
+    if f"_p_sourceGroup{source_id}" in pn:
+        sequence_paint_node = pn
+        break
+```
+
+### Filtering Blank Notes
+Notes are validated before export to exclude empty content:
+```python
+def normalize_note(self, text):
+    unwrapped = self.unwrap_note(text)
+    if not unwrapped:
+        return None  # Empty
+    if unwrapped.startswith("-"):
+        content = unwrapped[1:].strip()
+        if not content:
+            return None  # Just a dash
+    return f"- {content}"
+```
+
+### Drawing-Only Frames
+Frames with drawings but no text show a placeholder:
+```python
+if valid_texts or has_drawings:
+    valid_frames.append(frame)
+# In export:
+if not valid_texts:
+    lines.append("- *see annotated frame")
+```
+
 ## Save Review Feature Learnings
 
 ### Isolating a Source for Export
@@ -168,6 +209,54 @@ Common Mu-only functions:
 - `extra_commands.frameImage()`
 - `export_utils.exportMarkedFrames()`
 
+### Clearing Annotations via Internal Events
+
+RV's `Annotations > Clear Drawings` menu action can be triggered programmatically:
+```python
+# Navigate to frame, clear, return
+original_frame = commands.frame()
+commands.setFrame(target_frame)
+commands.sendInternalEvent("clear-annotations-current-frame", "", "")
+commands.setFrame(original_frame)
+```
+
+Available annotation events (from `annotate_mode.mu`):
+- `clear-annotations-current-frame` — Clear drawings on current frame
+- `clear-annotations-all-frames` — Clear all drawings (shows confirmation dialog)
+
+This is useful for cleaning up empty paint elements that RV's `markAnnotatedFrames()` incorrectly marks as annotated (e.g., text tool clicks with no content).
+
+## Text Rendering Constants
+
+Configurable constants in `NotesOverlay.py`:
+
+```python
+TEXT_SIZE = 0.005           # Relative to image height (0.5%)
+MAX_CHARS_PER_LINE = 58     # Calculated: 0.29 / TEXT_SIZE
+FORCE_BREAK_LENGTH = 37     # Force break long words (65% of max)
+LINE_SPACING = 0.08         # 8% of image height between lines
+SHADOW_OFFSET = 0.003       # Outline offset for readability
+```
+
+**Relationship:** `max_chars = 0.29 / TEXT_SIZE`
+- At 0.005 → 58 chars
+- At 0.004 → 72 chars
+- At 0.006 → 48 chars
+
+## Clipboard Module
+
+`clipboard.mu` provides system clipboard access via Qt:
+
+```python
+# From Python, copy text to clipboard:
+escaped = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+rv.runtime.eval(f'require clipboard; clipboard.copyText("{escaped}");', [])
+
+# For complex strings with special characters, use two-step approach:
+rv.runtime.eval('require clipboard; clipboard.setPendingText("...");', [])
+rv.runtime.eval('require clipboard; clipboard.copyPending();', [])
+```
+
 ## File Reference
 
 | File | Purpose |
@@ -176,7 +265,7 @@ Common Mu-only functions:
 | `notes_dialog.mu` | Custom Qt dialog for text input |
 | `clipboard.mu` | Clipboard access via Qt's QClipboard |
 | `PACKAGE` | RV package manifest |
-| `NotesOverlay.rvpkg` | Installable package (zip of above) |
+| `SnapReview.rvpkg` | Installable package (zip of above) |
 
 ## Testing
 
@@ -189,4 +278,4 @@ Common Mu-only functions:
 
 2. Restart RV after changes
 
-3. Test via `Review > Add Note` menu or `Shift+N` hotkey
+3. Test via `SnapReview > Add Note` menu or `Shift+N` hotkey

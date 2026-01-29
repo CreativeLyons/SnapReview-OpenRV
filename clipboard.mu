@@ -1,7 +1,7 @@
 //
-// NotesOverlay - Clipboard Utilities
+// SnapReview - Clipboard Utilities
 // ===================================
-// Provides clipboard access via Qt for the NotesOverlay plugin.
+// Provides clipboard access via Qt for the SnapReview plugin.
 //
 // This module uses RV's Mu Qt bindings to access the system clipboard.
 // It's called from Python via rv.runtime.eval() to copy text.

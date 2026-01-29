@@ -1,18 +1,18 @@
-# NotesOverlay for OpenRV
+# SnapReview for OpenRV
 
 📝 A Python plugin for [OpenRV](https://github.com/AcademySoftwareFoundation/OpenRV) that adds text annotation overlays to your review sessions.
 
 ## ✨ Features
 
 ### Quick Notes:
-- Add notes via `Review > Add Note` menu or `Shift+N` hotkey
+- Add notes via `SnapReview > Add Note` menu or `Shift+N` hotkey
 - Multi-line text input with copy/paste support
 - White text with black outline for readability on any background
 - Notes persist in session files (survives save/autosave)
 
 ---
 
-#### Add notes via `Review > Add Note` menu or `Shift+N` hotkey
+#### Add notes via `SnapReview > Add Note` menu or `Shift+N` hotkey
 
 ![notesOverlay_RV_05](https://github.com/user-attachments/assets/b7e44b26-5fe6-42cd-982d-c577a413466c)
 
@@ -41,7 +41,7 @@
 - Automatically resets view zoom and color corrections before export
 - Works with image sequences (normalizes frame patterns to `###` format)
 
-### Copy to Clipboard
+### Copy Notes
 - Export all notes with `Cmd+Shift+C` (macOS) / `Ctrl+Shift+C`
 - Markdown-friendly format with header, body, and file path
 - Captures both plugin notes AND RV's native paint text annotations
@@ -122,7 +122,7 @@ ln -s /path/to/clipboard.mu ~/.rv/Mu/
 ### Build from Source
 
 ```bash
-zip -r NotesOverlay.rvpkg PACKAGE NotesOverlay.py notes_dialog.mu clipboard.mu
+zip -r SnapReview.rvpkg PACKAGE NotesOverlay.py notes_dialog.mu clipboard.mu
 ```
 
 ## 📖 Usage
@@ -130,7 +130,7 @@ zip -r NotesOverlay.rvpkg PACKAGE NotesOverlay.py notes_dialog.mu clipboard.mu
 ### Adding Notes
 
 1. Navigate to the frame you want to annotate
-2. Press `Shift+N` or use `Review > Add Note`
+2. Press `Shift+N` or use `SnapReview > Add Note`
 3. Type your note in the dialog (multi-line supported, copy/paste works)
 4. Press `Enter` to save, `Escape` to cancel (`Shift+Enter` for new line)
 
