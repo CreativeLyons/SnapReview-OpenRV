@@ -193,6 +193,6 @@ Open RV is the open-source version of RV, the Sci-Tech award–winning media rev
 
 ## 📄 License
 
-See [LICENSE](LICENSE) if present.
+This project is licensed under the [MIT License](LICENSE).
 
 Video by RDNE Stock project: https://www.pexels.com/video/overhead-shot-of-astronauts-walking-in-an-outdoor-area-8474580/
