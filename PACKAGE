@@ -1,6 +1,6 @@
 package: NotesOverlay
 author: Tony Lyons
-version: 1.1
+version: 1.4
 rv: 3.0
 requires: ''
 
@@ -16,13 +16,13 @@ mu:
 
 description: |
   Review notes overlay plugin for OpenRV.
-  Adds Review > Add Note menu (Shift+N) for adding text annotations to frames.
+  Adds Review menu for adding text annotations and exporting review packages.
 
   Features:
-  - Multi-line text input with copy/paste support
+  - Add Note (Shift+N) - Multi-line text input with copy/paste support
   - White text with black outline for readability on any background
-  - Smart text wrapping
-  - Notes stack vertically on the same frame
+  - Smart text wrapping and vertical stacking
   - Timeline markers on frames with notes
   - Notes persist in RVPaint node properties (survives session save/autosave)
-  - Copy Notes to Clipboard (Ctrl+Shift+C) exports all notes for current source
+  - Copy Notes to Clipboard (Ctrl+Shift+C) - exports all notes for current source
+  - Save Review (Ctrl+Shift+S) - exports session, notes file, and annotated frames

@@ -32,7 +32,16 @@
 
 ---
 
-### Copy to Clipboard (New in v1.3.0)
+### Save Review (New in v1.4.0)
+- Export review package with `Cmd+Shift+S` (macOS) / `Ctrl+Shift+S`
+- Creates timestamped folder next to source with:
+  - RV session file (`.rv`)
+  - Notes text file with paths to exported content
+  - Annotated frames as JPGs in `frames/` subfolder
+- Automatically resets view zoom and color corrections before export
+- Works with image sequences (normalizes frame patterns to `###` format)
+
+### Copy to Clipboard
 - Export all notes with `Cmd+Shift+C` (macOS) / `Ctrl+Shift+C`
 - Markdown-friendly format with header, body, and file path
 - Captures both plugin notes AND RV's native paint text annotations
@@ -81,6 +90,7 @@ Frame 257
 |--------|----------|
 | Add Note | `Shift+N` |
 | Copy Notes | `Cmd+Shift+C` / `Ctrl+Shift+C` |
+| Save Review | `Cmd+Shift+S` / `Ctrl+Shift+S` |
 | Submit Note | `Enter` |
 | New Line | `Shift+Enter` |
 | Cancel | `Escape` |
@@ -145,7 +155,20 @@ Frame 1045
 
 ---
 
+source file:
 /path/to/shot_010_v002.mov
+
+source folder:
+/path/to/
+```
+
+When using **Save Review**, the footer also includes paths to the exported content:
+```
+annotations:
+/path/to/2026-01-29_143022_shot_010_v002-review/frames
+
+session:
+/path/to/2026-01-29_143022_shot_010_v002-review/shot_010_v002-review_session.rv
 ```
 
 The export includes both this plugin's notes and RV's native text annotations. Frames with only drawings show `- *see annotated frame` as a placeholder.

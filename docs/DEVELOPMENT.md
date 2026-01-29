@@ -98,30 +98,75 @@ class: NoteTextEdit : QTextEdit
 | QShortcut/QKeySequence | May not be exposed | Avoided, using keyPressEvent instead |
 | Closures in Mu callbacks | Silent failures | Use module globals |
 
-## Current Work in Progress
+## Save Review Feature Learnings
 
-### Feature: Ctrl+Enter to Submit Dialog
-**Branch:** `note-input-hotkeys`
-**Status:** In progress
+### Isolating a Source for Export
+To export only annotations from the current source (not all sources in timeline):
+```python
+# Save current view
+original_view = commands.viewNode()
 
-**Approach:** Subclass QDialog and override keyPressEvent to detect Ctrl+Return:
-```mu
-class: NoteDialog : QDialog
-{
-    method: keyPressEvent (void; QKeyEvent event)
-    {
-        if (event.key() == Qt.Key_Return &&
-            (event.modifiers() & Qt.ControlModifier) != 0)
-        {
-            accept();
-        }
-        else
-        {
-            QDialog.keyPressEvent(this, event);
-        }
-    }
-}
+# Switch to view only the source group
+source_group = commands.nodeGroup(source)
+commands.setViewNode(source_group)
+
+# Now timeline frames = source frames
+# Mark and export...
+
+# Restore original view
+commands.setViewNode(original_view)
 ```
+
+### Exporting Annotated Frames with rvio
+RV's `exportMarkedFrames` uses rvio to render frames. Use `#` for frame number substitution:
+```python
+# Mark annotated frames
+rv.runtime.eval("require rvui; rvui.clearAllMarks(); rvui.markAnnotatedFrames();", [])
+
+# Export with frame pattern (#### = 4 digits, e.g., 0001.jpg)
+rv.runtime.eval('require export_utils; export_utils.exportMarkedFrames("/path/####.jpg", "default");', [])
+```
+The number of `#` determines zero-padding.
+
+### Resetting View Before Export
+Two important resets before exporting frames:
+```python
+# Fit image to viewport (not resize window) - equivalent to 'f' key
+rv.runtime.eval("require extra_commands; extra_commands.frameImage();", [])
+
+# Reset color corrections - equivalent to Color > Reset All Color
+rv.runtime.eval("require rvui; rvui.resetAllColorParameters();", [])
+```
+
+### Image Sequence Path Patterns
+RV represents sequences with various notations:
+- `.30-69@@@.exr` — frame range 30-69, 3-digit padding
+- `.1001@@@.exr` — single frame reference with padding
+- `.%04d.exr` — printf-style
+- `.####.exr` — hash padding
+
+To normalize for display, convert to standard `#` format:
+```python
+# .30-69@@@ → .###
+re.sub(r'\.\d+-\d+@+(\.[^.]+)$', f'.{hashes}\\1', path)
+```
+
+### Python vs Mu Commands
+Some commands exist in Mu but not Python:
+```python
+# This fails - no clearAllMarks in Python
+commands.clearAllMarks()  # AttributeError!
+
+# Use Mu instead
+rv.runtime.eval("require rvui; rvui.clearAllMarks();", [])
+```
+
+Common Mu-only functions:
+- `rvui.clearAllMarks()`
+- `rvui.markAnnotatedFrames()`
+- `rvui.resetAllColorParameters()`
+- `extra_commands.frameImage()`
+- `export_utils.exportMarkedFrames()`
 
 ## File Reference
 
@@ -129,6 +174,7 @@ class: NoteDialog : QDialog
 |------|---------|
 | `NotesOverlay.py` | Main Python plugin (MinorMode) |
 | `notes_dialog.mu` | Custom Qt dialog for text input |
+| `clipboard.mu` | Clipboard access via Qt's QClipboard |
 | `PACKAGE` | RV package manifest |
 | `NotesOverlay.rvpkg` | Installable package (zip of above) |
 

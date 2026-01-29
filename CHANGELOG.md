@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-01-29
+
+### ✨ Added
+
+- **Save Review** — New menu item and `Cmd+Shift+S` / `Ctrl+Shift+S` hotkey
+  - Creates timestamped folder next to source file: `{YYYY-MM-DD_HHMMSS}_{source}-review/`
+  - Exports RV session file (`{source}-review_session.rv`)
+  - Exports notes to text file (`{source}_review_notes.txt`)
+  - Exports annotated frames as JPGs in `frames/` subfolder with zero-padded frame numbers
+  - Copies notes to clipboard (same as Copy Notes to Clipboard)
+- **Source Isolation** — Automatically switches to current source view before export
+  - Only exports annotations from the source you're standing on
+  - Frame numbers are source-relative, not timeline-relative
+- **Color Reset on Export** — Calls `resetAllColorParameters()` before exporting frames
+  - Ensures exported frames show original colors without user adjustments
+- **View Reset on Export** — Calls `frameImage()` to fit image in viewport before export
+- **Early Exit** — Bails out immediately with feedback if no annotations found
+- **Notes Footer Enhancement** — Footer now includes:
+  - `annotations:` path to exported frames folder
+  - `session:` path to saved RV session
+  - `source file:` path to source media
+  - `source folder:` directory containing source
+
+### 🔄 Changed
+
+- **Shadow Outline** — Increased from `0.002` to `0.003` (1.5x) for better readability over white backgrounds
+- **Notes Footer Format** — Labels on separate lines from paths for cleaner copy/paste
+- **Image Sequence Handling** — Strips frame range patterns (`.30-69@@@`) from folder names
+  - Normalizes paths in notes footer to `###` format for application compatibility
+
+### 🔧 Technical
+
+- New `save_review()` method orchestrates folder creation, session save, notes export, and frame export
+- New `_export_annotated_frames()` uses RV's `export_utils.exportMarkedFrames()` with rvio
+- New `_gather_notes_for_export()` extracts notes gathering logic for reuse
+- New `_sanitize_filename()` removes filesystem-unsafe characters
+- New `_strip_sequence_pattern()` handles various sequence notations (@@, %04d, ####)
+- New `_normalize_sequence_path()` converts RV sequence notation to standard `#` format
+- Uses `setViewNode()` to isolate source before marking/exporting
+- Frame padding auto-calculated from max frame number (minimum 4 digits)
+
 ## [1.3.0] - 2026-01-28
 
 ### ✨ Added

@@ -88,6 +88,9 @@ class NotesOverlayMode(MinorMode):
                 # Ctrl+Shift+C (Windows/Linux) and Cmd+Shift+C (macOS)
                 ("key-down--control--C", self.copy_notes_to_clipboard, "Copy notes to clipboard"),
                 ("key-down--meta--C", self.copy_notes_to_clipboard, "Copy notes to clipboard"),
+                # Ctrl+Shift+S (Windows/Linux) and Cmd+Shift+S (macOS)
+                ("key-down--control--S", self.save_review, "Save review to folder"),
+                ("key-down--meta--S", self.save_review, "Save review to folder"),
                 # Internal event for receiving text from Mu dialog
                 ("notes-overlay-text-entered", self._on_text_entered, "Handle entered note text"),
             ],
@@ -97,6 +100,7 @@ class NotesOverlayMode(MinorMode):
                 ("Review", [
                     ("Add Note", self.open_note_dialog, "N", None),
                     ("Copy Notes to Clipboard", self.copy_notes_to_clipboard, "C", None),
+                    ("Save Review", self.save_review, "S", None),
                 ]),
             ],
         )
@@ -284,7 +288,7 @@ class NotesOverlayMode(MinorMode):
 
         # Shadow offsets for outline effect (4 corners + 4 cardinals for thicker outline)
         # Offset proportional to text size
-        shadow_offset = 0.002  # Thicker outline
+        shadow_offset = 0.003  # 1.5x outline for readability over white
         offsets = [
             # 4 corners
             (-shadow_offset, -shadow_offset),
@@ -582,7 +586,7 @@ class NotesOverlayMode(MinorMode):
     BLACK = [0.0, 0.0, 0.0, 1.0]
 
     # Shadow offset for outline effect (in normalized coords)
-    SHADOW_OFFSET = 0.002
+    SHADOW_OFFSET = 0.003
 
     # -------------------------------------------------------------------------
     # Note Adding Methods
@@ -621,6 +625,474 @@ class NotesOverlayMode(MinorMode):
             note_text: The text content of the note.
         """
         self._add_note_to_frame(note_text, commands.frame())
+
+    # -------------------------------------------------------------------------
+    # Save Review
+    # -------------------------------------------------------------------------
+
+    def save_review(self, event):
+        """
+        Save review to a folder with session, notes text file, and annotated frame JPGs.
+
+        Creates a timestamped folder next to the source file containing:
+        - RV session file (.rv)
+        - Notes text file ({source}_review_notes.txt)
+        - JPG exports of all annotated frames
+
+        Also copies notes to clipboard (same as Copy Notes to Clipboard).
+
+        Folder naming: {YYYY-MM-DD_HHMM}_{source_name}-review/
+        """
+        import os
+        from datetime import datetime
+
+        # ---------------------------------------------------------------------
+        # Step 1: Get source info
+        # ---------------------------------------------------------------------
+        current_frame = commands.frame()
+        sources = commands.sourcesAtFrame(current_frame)
+
+        if not sources:
+            extra_commands.displayFeedback("No source at current frame", 2.0)
+            return
+
+        source = sources[0]
+
+        # Get source file path and name
+        try:
+            info = commands.sourceMediaInfo(source)
+            source_path = info.get("file", "")
+            if not source_path:
+                extra_commands.displayFeedback("Cannot determine source file path", 2.0)
+                return
+        except Exception as e:
+            extra_commands.displayFeedback(f"Error getting source info: {e}", 2.0)
+            return
+
+        # Extract source directory and base name (without extension)
+        source_dir = os.path.dirname(source_path)
+        source_filename = os.path.basename(source_path)
+        source_name, _ = os.path.splitext(source_filename)
+
+        # Strip image sequence frame range/padding patterns (e.g., .30-69@@@)
+        source_name = self._strip_sequence_pattern(source_name)
+
+        # Sanitize source name for filesystem (remove problematic characters)
+        safe_source_name = self._sanitize_filename(source_name)
+
+        # ---------------------------------------------------------------------
+        # Step 2: Check for annotations (bail out early if none)
+        # ---------------------------------------------------------------------
+        # Temporarily switch to source view to check for annotations
+        source_group = commands.nodeGroup(source)
+        try:
+            original_view = commands.viewNode()
+            commands.setViewNode(source_group)
+            rv.runtime.eval("require rvui; rvui.clearAllMarks(); rvui.markAnnotatedFrames();", [])
+            has_annotations = len(commands.markedFrames()) > 0
+            commands.setViewNode(original_view)
+        except Exception:
+            has_annotations = False
+
+        if not has_annotations:
+            extra_commands.displayFeedback("No annotations found", 2.0)
+            return
+
+        # ---------------------------------------------------------------------
+        # Step 3: Create review folder
+        # ---------------------------------------------------------------------
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        folder_name = f"{timestamp}_{safe_source_name}-review"
+        review_folder = os.path.join(source_dir, folder_name)
+
+        try:
+            os.makedirs(review_folder, exist_ok=True)
+        except OSError as e:
+            extra_commands.displayFeedback(f"Cannot create folder: {e}", 3.0)
+            return
+
+        # ---------------------------------------------------------------------
+        # Step 3: Save session file
+        # ---------------------------------------------------------------------
+        session_filename = f"{safe_source_name}-review_session.rv"
+        session_path = os.path.join(review_folder, session_filename)
+
+        try:
+            commands.saveSession(session_path, True, True)
+        except Exception as e:
+            extra_commands.displayFeedback(f"Error saving session: {e}", 3.0)
+            print(f"NotesOverlay: Session save error - {e}")
+            # Continue anyway - session save is not critical
+
+        # ---------------------------------------------------------------------
+        # Step 4: Create frames subfolder
+        # ---------------------------------------------------------------------
+        frames_folder = os.path.join(review_folder, "frames")
+        try:
+            os.makedirs(frames_folder, exist_ok=True)
+        except OSError as e:
+            print(f"NotesOverlay: Could not create frames folder - {e}")
+            frames_folder = review_folder  # Fallback to main folder
+
+        # ---------------------------------------------------------------------
+        # Step 5: Gather notes and save (also copy to clipboard)
+        # ---------------------------------------------------------------------
+        # Pass review paths so they appear in the notes footer
+        notes_text, total_notes, total_frames = self._gather_notes_for_export(
+            source, frames_folder=frames_folder, session_path=session_path
+        )
+
+        if notes_text:
+            # Save notes to file
+            notes_filename = f"{safe_source_name}_review_notes.txt"
+            notes_path = os.path.join(review_folder, notes_filename)
+            try:
+                with open(notes_path, "w", encoding="utf-8") as f:
+                    f.write(notes_text)
+            except OSError as e:
+                print(f"NotesOverlay: Error saving notes file - {e}")
+
+            # Copy to clipboard
+            try:
+                escaped_text = notes_text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+                mu_code = f'require clipboard; clipboard.copyText("{escaped_text}");'
+                rv.runtime.eval(mu_code, [])
+            except Exception as e:
+                print(f"NotesOverlay: Clipboard error - {e}")
+
+        # ---------------------------------------------------------------------
+        # Step 6: Export annotated frames as JPGs
+        # ---------------------------------------------------------------------
+        exported_count = self._export_annotated_frames(source, frames_folder)
+
+        # ---------------------------------------------------------------------
+        # Done - show feedback
+        # ---------------------------------------------------------------------
+        if exported_count > 0 or notes_text:
+            extra_commands.displayFeedback(
+                f"Saved {exported_count} Annotated Frames + Copied Notes to Clipboard",
+                3.0
+            )
+        else:
+            extra_commands.displayFeedback("No annotations found to export", 2.0)
+
+    def _sanitize_filename(self, name):
+        """
+        Sanitize a string for use as a filename.
+
+        Removes or replaces characters that are problematic on various filesystems.
+
+        Args:
+            name: The string to sanitize.
+
+        Returns:
+            str: Sanitized filename-safe string.
+        """
+        # Characters to remove (problematic on Windows/macOS/Linux)
+        invalid_chars = '<>:"/\\|?*'
+        result = name
+        for char in invalid_chars:
+            result = result.replace(char, "_")
+        # Remove leading/trailing whitespace and dots
+        result = result.strip(". ")
+        return result if result else "unnamed"
+
+    def _strip_sequence_pattern(self, name):
+        """
+        Strip frame range and padding pattern from image sequence names.
+
+        RV represents image sequences with patterns like:
+        - 'shot.30-69@@@' (frame range 30-69, 3-digit padding)
+        - 'shot.1001@@@@@' (single frame reference with padding)
+        - 'shot.%04d' (printf-style pattern)
+
+        This strips those patterns to get just the base name.
+
+        Args:
+            name: The source name (already without file extension).
+
+        Returns:
+            str: Base name without frame range/padding pattern.
+        """
+        import re
+
+        # Pattern 1: .{digits}-{digits}{@s} (e.g., .30-69@@@)
+        # Pattern 2: .{digits}{@s} (e.g., .1001@@@)
+        # Pattern 3: .{@s} (e.g., .@@@)
+        # Pattern 4: .%0{n}d (e.g., .%04d)
+        # Pattern 5: .##### (hash padding)
+        patterns = [
+            r'\.\d+-\d+@+$',      # .30-69@@@
+            r'\.\d+@+$',          # .1001@@@
+            r'\.@+$',             # .@@@
+            r'\.%\d*d$',          # .%04d or .%d
+            r'\.#+$',             # .#### or .#####
+            r'\.\d+$',            # .1001 (just frame number)
+        ]
+
+        result = name
+        for pattern in patterns:
+            result = re.sub(pattern, '', result)
+            if result != name:
+                break  # Stop after first match
+
+        return result if result else name
+
+    def _normalize_sequence_path(self, path):
+        """
+        Normalize image sequence path to standard # padding format.
+
+        Converts RV's sequence notation to standard # format:
+        - 'shot.30-69@@@.exr' → 'shot.###.exr'
+        - 'shot.1001@@@@.exr' → 'shot.####.exr'
+        - 'shot.%04d.exr' → 'shot.####.exr'
+
+        For non-sequences, returns the path unchanged.
+
+        Args:
+            path: Full file path.
+
+        Returns:
+            str: Path with normalized sequence notation.
+        """
+        import re
+
+        # Pattern: .{optional digits}{optional dash}{optional digits}{@s}.ext
+        # Capture the @ count to determine padding
+        match = re.search(r'\.(\d+-\d+)?(@+)(\.[^.]+)$', path)
+        if match:
+            at_count = len(match.group(2))
+            hashes = '#' * at_count
+            return re.sub(r'\.\d*-?\d*@+(\.[^.]+)$', f'.{hashes}\\1', path)
+
+        # Pattern: .{digits}{@s}.ext (without range)
+        match = re.search(r'\.(\d+)(@+)(\.[^.]+)$', path)
+        if match:
+            at_count = len(match.group(2))
+            hashes = '#' * at_count
+            return re.sub(r'\.\d+@+(\.[^.]+)$', f'.{hashes}\\1', path)
+
+        # Pattern: .{@s}.ext (just @s)
+        match = re.search(r'\.(@+)(\.[^.]+)$', path)
+        if match:
+            at_count = len(match.group(1))
+            hashes = '#' * at_count
+            return re.sub(r'\.@+(\.[^.]+)$', f'.{hashes}\\1', path)
+
+        # Pattern: .%0Nd.ext (printf style)
+        match = re.search(r'\.%0?(\d*)d(\.[^.]+)$', path)
+        if match:
+            num_digits = int(match.group(1)) if match.group(1) else 4
+            hashes = '#' * num_digits
+            return re.sub(r'\.%0?\d*d(\.[^.]+)$', f'.{hashes}\\1', path)
+
+        # No sequence pattern found, return as-is
+        return path
+
+    def _gather_notes_for_export(self, source, frames_folder=None, session_path=None):
+        """
+        Gather all notes from a source for export.
+
+        Reuses logic from copy_notes_to_clipboard but returns the text
+        instead of copying directly to clipboard.
+
+        Args:
+            source: The source node to gather notes from.
+            frames_folder: Path to exported frames folder (optional, for Save Review).
+            session_path: Path to saved RV session file (optional, for Save Review).
+
+        Returns:
+            tuple: (formatted_text, total_notes, total_frames)
+                - formatted_text: The formatted notes string (or None if no notes)
+                - total_notes: Count of text notes
+                - total_frames: Count of frames with annotations
+        """
+        import os
+
+        # Mark all annotated frames first (ensures native annotations are marked)
+        try:
+            rv.runtime.eval("require rvui; rvui.markAnnotatedFrames();", [])
+        except Exception:
+            pass  # Non-critical
+
+        # Get paint node for this source
+        source_group = commands.nodeGroup(source)
+        paint_nodes = extra_commands.nodesInGroupOfType(source_group, "RVPaint")
+
+        if not paint_nodes:
+            return (None, 0, 0)
+
+        source_paint_node = paint_nodes[0]
+
+        # Find sequence paint node for native RV annotations
+        sequence_paint_node = None
+        try:
+            all_paint_nodes = commands.nodesOfType("RVPaint")
+            source_id = source_group.replace("sourceGroup", "")
+            for pn in all_paint_nodes:
+                if f"_p_sourceGroup{source_id}" in pn or f"_p_{source_group}" in pn:
+                    sequence_paint_node = pn
+                    break
+        except Exception:
+            pass
+
+        # Get annotated frames from both paint nodes
+        annotated_frames = self.get_annotated_frames(source_paint_node)
+        native_frames = []
+        if sequence_paint_node:
+            native_frames = self.get_annotated_frames(sequence_paint_node)
+
+        all_annotated_frames = sorted(set(annotated_frames) | set(native_frames))
+
+        if not all_annotated_frames:
+            return (None, 0, 0)
+
+        # Gather notes for each frame
+        frame_notes = {}
+        drawing_only_frames = set()
+
+        # Process source paint node frames (our plugin notes)
+        for frame in annotated_frames:
+            texts, has_drawings = self.get_notes_for_frame(source_paint_node, frame)
+            if texts:
+                if frame not in frame_notes:
+                    frame_notes[frame] = []
+                frame_notes[frame].extend(texts)
+            elif has_drawings:
+                drawing_only_frames.add(frame)
+
+        # Process sequence paint node frames (native RV annotations)
+        if sequence_paint_node:
+            for global_frame in native_frames:
+                try:
+                    src_frame = extra_commands.sourceFrame(global_frame)
+                except Exception:
+                    src_frame = global_frame
+
+                texts, has_drawings = self.get_notes_for_frame(sequence_paint_node, global_frame)
+                if texts:
+                    if src_frame not in frame_notes:
+                        frame_notes[src_frame] = []
+                    frame_notes[src_frame].extend(texts)
+                elif has_drawings:
+                    drawing_only_frames.add(src_frame)
+
+        if not frame_notes and not drawing_only_frames:
+            return (None, 0, 0)
+
+        # Get source filename and path for export formatting
+        try:
+            info = commands.sourceMediaInfo(source)
+            source_path = info.get("file", "")
+            source_name = os.path.basename(source_path) if source_path else str(source)
+        except Exception:
+            source_path = ""
+            source_name = str(source)
+
+        # Format output
+        output_text = self.format_notes_for_export(
+            source_name, source_path, frame_notes, drawing_only_frames,
+            frames_folder=frames_folder, session_path=session_path
+        )
+
+        total_notes = sum(len(notes) for notes in frame_notes.values())
+        total_frames = len(frame_notes) + len(drawing_only_frames)
+
+        return (output_text, total_notes, total_frames)
+
+    def _export_annotated_frames(self, source, review_folder):
+        """
+        Export all annotated frames as JPG files for the current source only.
+
+        Temporarily switches the view to show only the current source, which:
+        1. Isolates annotations to this source only
+        2. Makes timeline frames equal to source frames
+
+        Uses RV's built-in export functionality via export_utils.exportMarkedFrames.
+
+        Args:
+            source: The source node to export frames from.
+            review_folder: Path to the folder to save JPGs in.
+
+        Returns:
+            int: Number of frames that will be exported.
+        """
+        import os
+
+        # Get the source group for this source
+        source_group = commands.nodeGroup(source)
+
+        # Save current view node to restore later
+        try:
+            original_view = commands.viewNode()
+        except Exception as e:
+            print(f"NotesOverlay: Could not get current view - {e}")
+            original_view = None
+
+        # Switch to view only the current source group
+        # This isolates the timeline to just this source (source frames = timeline frames)
+        try:
+            commands.setViewNode(source_group)
+        except Exception as e:
+            print(f"NotesOverlay: Could not switch view to source - {e}")
+            return 0
+
+        # Clear existing marks and mark only annotated frames for this source
+        try:
+            rv.runtime.eval("require rvui; rvui.clearAllMarks(); rvui.markAnnotatedFrames();", [])
+        except Exception as e:
+            print(f"NotesOverlay: Could not mark annotated frames - {e}")
+
+        # Get marked frames to count them and determine padding
+        try:
+            marked_frames = commands.markedFrames()
+        except Exception as e:
+            print(f"NotesOverlay: Could not get marked frames - {e}")
+            marked_frames = []
+
+        exported_count = 0
+
+        if marked_frames:
+            # Determine number of digits needed for frame numbers
+            # Use at least 4 digits for consistency, but more if needed
+            max_frame = max(marked_frames)
+            num_digits = max(4, len(str(max_frame)))
+
+            # Build frame pattern (e.g., "####" for 4 digits)
+            frame_pattern = "#" * num_digits
+
+            # Build output path pattern
+            jpg_pattern = os.path.join(review_folder, f"{frame_pattern}.jpg")
+
+            # Reset view to fit image in viewport before export
+            try:
+                rv.runtime.eval("require extra_commands; extra_commands.frameImage();", [])
+            except Exception as e:
+                print(f"NotesOverlay: Could not frame view - {e}")
+
+            # Reset all color corrections before export
+            try:
+                rv.runtime.eval("require rvui; rvui.resetAllColorParameters();", [])
+            except Exception as e:
+                print(f"NotesOverlay: Could not reset color - {e}")
+
+            # Call RV's export function
+            try:
+                escaped_path = jpg_pattern.replace("\\", "/")
+                mu_code = f'require export_utils; export_utils.exportMarkedFrames("{escaped_path}", "default");'
+                rv.runtime.eval(mu_code, [])
+                exported_count = len(marked_frames)
+            except Exception as e:
+                print(f"NotesOverlay: Error exporting frames - {e}")
+
+        # Restore original view
+        if original_view:
+            try:
+                commands.setViewNode(original_view)
+            except Exception as e:
+                print(f"NotesOverlay: Could not restore view - {e}")
+
+        return exported_count
 
     # -------------------------------------------------------------------------
     # Copy Notes to Clipboard
@@ -936,7 +1408,8 @@ class NotesOverlayMode(MinorMode):
 
         return unwrapped
 
-    def format_notes_for_export(self, source_name, source_path, frame_notes, drawing_only_frames=None):
+    def format_notes_for_export(self, source_name, source_path, frame_notes, drawing_only_frames=None,
+                                 frames_folder=None, session_path=None):
         """
         Format notes for clipboard export.
 
@@ -952,6 +1425,8 @@ class NotesOverlayMode(MinorMode):
             source_path: The full file path for footer metadata.
             frame_notes: Dict mapping frame numbers to lists of note texts.
             drawing_only_frames: Set of frame numbers with only drawings (optional).
+            frames_folder: Path to exported frames folder (optional, from Save Review).
+            session_path: Path to saved RV session file (optional, from Save Review).
 
         Returns:
             str: Formatted notes string ready for clipboard.
@@ -981,10 +1456,13 @@ class NotesOverlayMode(MinorMode):
         if drawing_only_frames is None:
             drawing_only_frames = set()
 
+        # Normalize sequence names to standard # format
+        normalized_source_name = self._normalize_sequence_path(source_name)
+
         lines = []
 
         # Header: source name + datetime
-        lines.append(f"Notes on {source_name}")
+        lines.append(f"Notes on {normalized_source_name}")
         lines.append(datetime.now().strftime("%Y-%m-%d %H:%M"))
         lines.append("")
         lines.append("---")
@@ -1012,14 +1490,42 @@ class NotesOverlayMode(MinorMode):
             if i < len(all_frames) - 1:
                 lines.append("")
 
-        # Footer: separator + file path
+        # Footer: separator + file paths
         lines.append("")
         lines.append("---")
         lines.append("")
+
+        # Review export paths first (only when Save Review was used)
+        if frames_folder:
+            lines.append("annotations:")
+            lines.append(frames_folder)
+            lines.append("")
+        if session_path:
+            lines.append("session:")
+            lines.append(session_path)
+            lines.append("")
+
+        # Separator between review paths and source info
+        if frames_folder or session_path:
+            lines.append("---")
+            lines.append("")
+
+        # Source file path
+        lines.append("source file:")
         if source_path:
-            lines.append(source_path)
+            # Normalize sequence paths to standard # format
+            normalized_path = self._normalize_sequence_path(source_path)
+            lines.append(normalized_path)
         else:
             lines.append(source_name)
+
+        # Source folder path
+        if source_path:
+            import os
+            source_folder = os.path.dirname(source_path)
+            lines.append("")
+            lines.append("source folder:")
+            lines.append(source_folder)
 
         return "\n".join(lines)
 
