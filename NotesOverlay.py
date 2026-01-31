@@ -236,7 +236,7 @@ class NotesOverlayMode(MinorMode):
         existing_notes = self.count_note_lines(source_frame)
 
         # Draw the note with outline
-        self._draw_note_with_outline_on_frame(paint_node, source_frame, wrapped_note, existing_notes)
+        self._draw_note_with_outline_on_frame(paint_node, source_frame, wrapped_note, existing_notes, source)
 
         # Mark the frame on the timeline so user can see which frames have notes
         commands.markFrame(frame, True)
@@ -244,7 +244,7 @@ class NotesOverlayMode(MinorMode):
         # Force redraw
         commands.redraw()
 
-    def _draw_note_with_outline_on_frame(self, paint_node, frame, text, line_offset):
+    def _draw_note_with_outline_on_frame(self, paint_node, frame, text, line_offset, source=None):
         """
         Draw note text with black outline effect on a specific frame.
 
@@ -253,22 +253,24 @@ class NotesOverlayMode(MinorMode):
 
         Args:
             paint_node: The RVPaint node to draw on.
-            frame: The frame number.
+            frame: The source-relative frame number for drawing.
             text: Note text to display.
             line_offset: Vertical offset based on existing notes (in lines).
+            source: The source node to get dimensions from (avoids frame lookup issues).
         """
-        scale = self.get_image_scale(frame)
+        scale = self.get_image_scale(source=source)
 
         # Get image dimensions from source media info
         try:
-            sources = commands.sourcesAtFrame(frame)
-            if sources:
-                info = commands.sourceMediaInfo(sources[0])
-                img_w = info.get("width", 1920)
-                img_h = info.get("height", 1080)
-                aspect = img_w / img_h
+            if source:
+                info = commands.sourceMediaInfo(source)
             else:
-                aspect = 16 / 9  # Default 16:9
+                # Fallback to current frame lookup (less reliable for sequences)
+                sources = commands.sourcesAtFrame(commands.frame())
+                info = commands.sourceMediaInfo(sources[0]) if sources else {}
+            img_w = info.get("width", 1920)
+            img_h = info.get("height", 1080)
+            aspect = img_w / img_h
         except Exception:
             aspect = 16 / 9
 
@@ -594,7 +596,7 @@ class NotesOverlayMode(MinorMode):
     # Note Adding Methods
     # -------------------------------------------------------------------------
 
-    def get_image_scale(self, frame=None):
+    def get_image_scale(self, frame=None, source=None):
         """
         Calculate text scale factor based on source image dimensions.
 
@@ -602,20 +604,25 @@ class NotesOverlayMode(MinorMode):
         similarly sized regardless of source resolution.
 
         Args:
-            frame: Optional frame number to sample; defaults to current frame.
+            frame: Optional timeline frame number to sample; defaults to current frame.
+            source: Optional source node to get dimensions from (preferred over frame).
 
         Returns:
             float: Scale factor for text size.
         """
         try:
-            if frame is None:
-                frame = commands.frame()
-            sources = commands.sourcesAtFrame(frame)
-
-            if sources:
+            if source:
+                info = commands.sourceMediaInfo(source)
+            else:
+                if frame is None:
+                    frame = commands.frame()
+                sources = commands.sourcesAtFrame(frame)
+                if not sources:
+                    return self.BASE_SCALE
                 info = commands.sourceMediaInfo(sources[0])
-                image_height = info.get("height", self.REFERENCE_HEIGHT)
-                return self.BASE_SCALE * (self.REFERENCE_HEIGHT / image_height)
+
+            image_height = info.get("height", self.REFERENCE_HEIGHT)
+            return self.BASE_SCALE * (self.REFERENCE_HEIGHT / image_height)
         except Exception:
             pass
 
