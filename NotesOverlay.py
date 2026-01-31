@@ -609,7 +609,8 @@ class NotesOverlayMode(MinorMode):
             if sources:
                 info = commands.sourceMediaInfo(sources[0])
                 image_height = info.get("height", self.REFERENCE_HEIGHT)
-                return self.BASE_SCALE * (self.REFERENCE_HEIGHT / image_height)
+                if image_height > 0:
+                    return self.BASE_SCALE * (self.REFERENCE_HEIGHT / image_height)
         except Exception:
             pass
 
