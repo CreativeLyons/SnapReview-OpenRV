@@ -44,3 +44,6 @@ dmypy.json
 # Ruff
 .ruff_cache/
 
+# Code review reports and workflow
+.code-review/
+
