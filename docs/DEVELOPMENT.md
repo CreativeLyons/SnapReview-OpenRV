@@ -282,6 +282,8 @@ rv.runtime.eval(f'require clipboard; clipboard.copyText("'{escaped}'");', [])
 zip -r SnapReview.rvpkg PACKAGE NotesOverlay.py notes_dialog.mu clipboard.mu
 ```
 
+A project rule (`.cursor/rules/checkpoint-rebuild-rvpkg.mdc`) ensures the rvpkg is rebuilt during checkpoint-commit and release-prep.
+
 ## Fixes
 
 - Fixed issue #7
