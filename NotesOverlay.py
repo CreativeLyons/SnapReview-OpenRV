@@ -793,7 +793,7 @@ class NotesOverlayMode(MinorMode):
 
             # Copy to clipboard
             try:
-                escaped_text = notes_text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+                escaped_text = self._escape_text_for_mu(notes_text)
                 mu_code = f'require clipboard; clipboard.copyText("{escaped_text}");'
                 rv.runtime.eval(mu_code, [])
             except Exception as e:
@@ -835,6 +835,10 @@ class NotesOverlayMode(MinorMode):
         # Remove leading/trailing whitespace and dots
         result = result.strip(". ")
         return result if result else "unnamed"
+
+    def _escape_text_for_mu(self, text):
+        """Escape text for embedding in Mu string literal."""
+        return text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
     def _strip_sequence_pattern(self, name):
         """
@@ -1288,8 +1292,7 @@ class NotesOverlayMode(MinorMode):
 
         # Copy to clipboard via Mu
         try:
-            # Escape special characters for Mu string literal
-            escaped_text = output_text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+            escaped_text = self._escape_text_for_mu(output_text)
             mu_code = f'require clipboard; clipboard.copyText("{escaped_text}");'
             rv.runtime.eval(mu_code, [])
 

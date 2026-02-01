@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Used the explicit frame when computing note scale/aspect for render accuracy.
 - Aborted note creation when source frame conversion fails to prevent wrong-frame notes.
 - Ensured view node restoration after exporting annotated frames, even on errors.
+- Extracted `_escape_text_for_mu()` helper to deduplicate Mu string escaping in Save Review and Copy Notes (Fixed issue #16).
 
 ## [1.5.0] - 2026-01-29
 
