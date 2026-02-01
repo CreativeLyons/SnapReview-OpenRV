@@ -1527,8 +1527,6 @@ class NotesOverlayMode(MinorMode):
             else:
                 return f"- {content_after_dash}"
 
-        return unwrapped
-
     def format_notes_for_export(self, source_name, source_path, frame_notes, drawing_only_frames=None,
                                 frames_folder=None, session_path=None):
         """
