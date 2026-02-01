@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Guard against division by zero when source height is 0 in `get_image_scale()` (Fixed issue #14).
 - Removed unused `setPendingText()`, `copyPending()`, and `_pendingText` from clipboard.mu (Fixed issue #18).
 - Session save failure now indicated in final feedback when Save Review partially fails (Fixed issue #11).
+- Removed empty `requires` field from PACKAGE manifest (Fixed issue #15).
 
 ## [1.5.0] - 2026-01-29
 

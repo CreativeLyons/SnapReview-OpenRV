@@ -2,7 +2,6 @@ package: SnapReview
 author: Tony Lyons
 version: 1.5
 rv: 3.0
-requires: ''
 
 modes:
   - file: NotesOverlay
