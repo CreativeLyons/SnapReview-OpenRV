@@ -13,8 +13,7 @@
 #
 # The Mu module is required because:
 # 1. RV's native text entry mode doesn't support copy/paste
-# 2. PySide2/6 may not be available in all RV builds
-# 3. Mu provides direct access to Qt widgets via RV's Qt bindings
+# 2. Mu provides direct access to Qt widgets via RV's Qt bindings
 #
 # KEY TECHNICAL DISCOVERIES:
 # - QPushButton.clicked signal passes (bool checked) to callbacks
@@ -37,28 +36,8 @@ from rv.rvtypes import MinorMode
 import rv.runtime
 
 # -----------------------------------------------------------------------------
-# PySide imports (optional, for improved text input)
+# Note input uses Mu (notes_dialog.mu) - no PySide imports required
 # -----------------------------------------------------------------------------
-PYSIDE_AVAILABLE = False
-PYSIDE_VERSION = None
-
-try:
-    from PySide2.QtWidgets import QDialog, QVBoxLayout, QPlainTextEdit, QPushButton, QLabel
-    from PySide2.QtCore import Qt
-    import rv.qtutils
-    PYSIDE_AVAILABLE = True
-    PYSIDE_VERSION = "PySide2"
-except ImportError:
-    try:
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QPlainTextEdit, QPushButton, QLabel
-        from PySide6.QtCore import Qt
-        import rv.qtutils
-        PYSIDE_AVAILABLE = True
-        PYSIDE_VERSION = "PySide6"
-    except ImportError:
-        pass
-
-# PySide not required - using QInputDialog via Mu instead
 
 
 class NotesOverlayMode(MinorMode):
@@ -145,26 +124,6 @@ class NotesOverlayMode(MinorMode):
             extra_commands.displayFeedback(f"Note dialog failed: {e}", 3.0)
             print(f"NotesOverlay: Dialog error - {e}")
 
-    def _open_note_dialog_legacy(self, event):
-        """
-        Legacy: Open note input using RV's native text entry mode.
-
-        This is the old method that uses RV's built-in startTextEntryMode.
-        Kept as fallback but not used by default because:
-        - No copy/paste support
-        - Single line only
-        - Easy to accidentally close and lose input
-        """
-        self._pending_note_frame = commands.frame()
-
-        try:
-            mu_code = 'rvui.startTextEntryMode(\\: (string;) { "Enter note: "; }, \\: (void; string t) { commands.sendInternalEvent("notes-overlay-text-entered", t, ""); }, false)(nil);'
-            rv.runtime.eval(mu_code, [])
-            extra_commands.displayFeedback("Type note and press Enter...", 2.0)
-        except Exception:
-            extra_commands.displayFeedback("Error starting text entry - see console", 2.0)
-            print(traceback.format_exc())
-
     def _on_text_entered(self, event):
         """
         Handle the internal event when text is entered via note dialog.
@@ -209,8 +168,10 @@ class NotesOverlayMode(MinorMode):
         # This is critical for sequences where source frames != timeline frames
         try:
             source_frame = extra_commands.sourceFrame(frame)
-        except Exception:
-            source_frame = frame
+        except Exception as e:
+            extra_commands.displayFeedback("Cannot add note - frame conversion failed", 2.0)
+            print(f"NotesOverlay: sourceFrame conversion failed for frame {frame}: {e}")
+            return
 
         source_group = commands.nodeGroup(source)
         paint_nodes = extra_commands.nodesInGroupOfType(source_group, "RVPaint")
@@ -234,7 +195,7 @@ class NotesOverlayMode(MinorMode):
         existing_notes = self.count_note_lines(source_frame)
 
         # Draw the note with outline
-        self._draw_note_with_outline_on_frame(paint_node, source_frame, wrapped_note, existing_notes)
+        self._draw_note_with_outline_on_frame(paint_node, source_frame, wrapped_note, existing_notes, source)
 
         # Mark the frame on the timeline so user can see which frames have notes
         commands.markFrame(frame, True)
@@ -242,7 +203,7 @@ class NotesOverlayMode(MinorMode):
         # Force redraw
         commands.redraw()
 
-    def _draw_note_with_outline_on_frame(self, paint_node, frame, text, line_offset):
+    def _draw_note_with_outline_on_frame(self, paint_node, frame, text, line_offset, source=None):
         """
         Draw note text with black outline effect on a specific frame.
 
@@ -251,22 +212,24 @@ class NotesOverlayMode(MinorMode):
 
         Args:
             paint_node: The RVPaint node to draw on.
-            frame: The frame number.
+            frame: The source-relative frame number for drawing.
             text: Note text to display.
             line_offset: Vertical offset based on existing notes (in lines).
+            source: The source node to get dimensions from (avoids frame lookup issues).
         """
-        scale = self.get_image_scale()
+        scale = self.get_image_scale(source=source)
 
         # Get image dimensions from source media info
         try:
-            sources = commands.sourcesAtFrame(commands.frame())
-            if sources:
-                info = commands.sourceMediaInfo(sources[0])
-                img_w = info.get("width", 1920)
-                img_h = info.get("height", 1080)
-                aspect = img_w / img_h
+            if source:
+                info = commands.sourceMediaInfo(source)
             else:
-                aspect = 16 / 9  # Default 16:9
+                # Fallback to current frame lookup (less reliable for sequences)
+                sources = commands.sourcesAtFrame(commands.frame())
+                info = commands.sourceMediaInfo(sources[0]) if sources else {}
+            img_w = info.get("width", 1920)
+            img_h = info.get("height", 1080)
+            aspect = img_w / img_h
         except Exception:
             aspect = 16 / 9
 
@@ -592,25 +555,33 @@ class NotesOverlayMode(MinorMode):
     # Note Adding Methods
     # -------------------------------------------------------------------------
 
-    def get_image_scale(self):
+    def get_image_scale(self, frame=None, source=None):
         """
         Calculate text scale factor based on source image dimensions.
 
         Normalizes text size relative to a 1080p reference so text appears
         similarly sized regardless of source resolution.
 
+        Args:
+            frame: Optional timeline frame number to sample; defaults to current frame.
+            source: Optional source node to get dimensions from (preferred over frame).
+
         Returns:
             float: Scale factor for text size.
         """
         try:
-            view_frame = commands.frame()
-            sources = commands.sourcesAtFrame(view_frame)
-
-            if sources:
+            if source:
+                info = commands.sourceMediaInfo(source)
+            else:
+                if frame is None:
+                    frame = commands.frame()
+                sources = commands.sourcesAtFrame(frame)
+                if not sources:
+                    return self.BASE_SCALE
                 info = commands.sourceMediaInfo(sources[0])
-                image_height = info.get("height", self.REFERENCE_HEIGHT)
-                if image_height > 0:
-                    return self.BASE_SCALE * (self.REFERENCE_HEIGHT / image_height)
+            image_height = info.get("height", self.REFERENCE_HEIGHT)
+            if image_height > 0:
+                return self.BASE_SCALE * (self.REFERENCE_HEIGHT / image_height)
         except Exception:
             pass
 
@@ -686,6 +657,8 @@ class NotesOverlayMode(MinorMode):
         # ---------------------------------------------------------------------
         # Temporarily switch to source view to check for annotations
         source_group = commands.nodeGroup(source)
+        original_view = None
+        has_annotations = False
         try:
             original_view = commands.viewNode()
             commands.setViewNode(source_group)
@@ -694,7 +667,6 @@ class NotesOverlayMode(MinorMode):
 
             # Filter out frames with no visible content (empty text elements)
             # RV marks frames with any paint element, including empty ones
-            has_annotations = False
             paint_nodes = extra_commands.nodesInGroupOfType(source_group, "RVPaint")
             if paint_nodes and marked_frames:
                 source_paint_node = paint_nodes[0]
@@ -711,10 +683,14 @@ class NotesOverlayMode(MinorMode):
             # Re-mark after cleanup so timeline reflects accurate state
             if has_annotations:
                 rv.runtime.eval("require rvui; rvui.clearAllMarks(); rvui.markAnnotatedFrames();", [])
-
-            commands.setViewNode(original_view)
         except Exception:
             has_annotations = False
+        finally:
+            if original_view:
+                try:
+                    commands.setViewNode(original_view)
+                except Exception:
+                    pass
 
         if not has_annotations:
             extra_commands.displayFeedback("No annotations found", 2.0)
@@ -776,7 +752,7 @@ class NotesOverlayMode(MinorMode):
 
             # Copy to clipboard
             try:
-                escaped_text = notes_text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+                escaped_text = self._escape_text_for_mu(notes_text)
                 mu_code = f'require clipboard; clipboard.copyText("{escaped_text}");'
                 rv.runtime.eval(mu_code, [])
             except Exception as e:
@@ -818,6 +794,10 @@ class NotesOverlayMode(MinorMode):
         # Remove leading/trailing whitespace and dots
         result = result.strip(". ")
         return result if result else "unnamed"
+
+    def _escape_text_for_mu(self, text):
+        """Escape text for embedding in Mu string literal."""
+        return text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
     def _strip_sequence_pattern(self, name):
         """
@@ -1051,95 +1031,96 @@ class NotesOverlayMode(MinorMode):
             print(f"NotesOverlay: Could not get current view - {e}")
             original_view = None
 
-        # Switch to view only the current source group
-        # This isolates the timeline to just this source (source frames = timeline frames)
         try:
-            commands.setViewNode(source_group)
-        except Exception as e:
-            print(f"NotesOverlay: Could not switch view to source - {e}")
-            return 0
-
-        # Clear existing marks and mark only annotated frames for this source
-        try:
-            rv.runtime.eval("require rvui; rvui.clearAllMarks(); rvui.markAnnotatedFrames();", [])
-        except Exception as e:
-            print(f"NotesOverlay: Could not mark annotated frames - {e}")
-
-        # Get marked frames to count them and determine padding
-        try:
-            marked_frames = commands.markedFrames()
-        except Exception as e:
-            print(f"NotesOverlay: Could not get marked frames - {e}")
-            marked_frames = []
-
-        # Filter out frames with no visible content (empty text elements)
-        # RV marks frames with any paint element, including empty ones
-        paint_nodes = extra_commands.nodesInGroupOfType(source_group, "RVPaint")
-        if paint_nodes and marked_frames:
-            source_paint_node = paint_nodes[0]
-            valid_frames = []
-            for frame in marked_frames:
-                texts, has_drawings = self.get_notes_for_frame(source_paint_node, frame)
-                # Filter blank texts using the same logic as normalize_note
-                valid_texts = [t for t in texts if self.normalize_note(t)]
-                if valid_texts or has_drawings:
-                    valid_frames.append(frame)
-                else:
-                    # Frame has only empty text elements - clean them up
-                    self._clean_empty_paint_elements(source_paint_node, frame)
-            marked_frames = valid_frames
-
-            # Clear RV marks and re-mark only valid frames
+            # Switch to view only the current source group
+            # This isolates the timeline to just this source (source frames = timeline frames)
             try:
-                rv.runtime.eval("require rvui; rvui.clearAllMarks();", [])
-                for frame in valid_frames:
-                    commands.markFrame(frame, True)
+                commands.setViewNode(source_group)
             except Exception as e:
-                print(f"NotesOverlay: Could not update marks - {e}")
+                print(f"NotesOverlay: Could not switch view to source - {e}")
+                return 0
 
-        exported_count = 0
-
-        if marked_frames:
-            # Determine number of digits needed for frame numbers
-            # Use at least 4 digits for consistency, but more if needed
-            max_frame = max(marked_frames)
-            num_digits = max(4, len(str(max_frame)))
-
-            # Build frame pattern (e.g., "####" for 4 digits)
-            frame_pattern = "#" * num_digits
-
-            # Build output path pattern
-            jpg_pattern = os.path.join(review_folder, f"{frame_pattern}.jpg")
-
-            # Reset view to fit image in viewport before export
+            # Clear existing marks and mark only annotated frames for this source
             try:
-                rv.runtime.eval("require extra_commands; extra_commands.frameImage();", [])
+                rv.runtime.eval("require rvui; rvui.clearAllMarks(); rvui.markAnnotatedFrames();", [])
             except Exception as e:
-                print(f"NotesOverlay: Could not frame view - {e}")
+                print(f"NotesOverlay: Could not mark annotated frames - {e}")
 
-            # Reset all color corrections before export
+            # Get marked frames to count them and determine padding
             try:
-                rv.runtime.eval("require rvui; rvui.resetAllColorParameters();", [])
+                marked_frames = commands.markedFrames()
             except Exception as e:
-                print(f"NotesOverlay: Could not reset color - {e}")
+                print(f"NotesOverlay: Could not get marked frames - {e}")
+                marked_frames = []
 
-            # Call RV's export function
-            try:
-                escaped_path = jpg_pattern.replace("\\", "/")
-                mu_code = f'require export_utils; export_utils.exportMarkedFrames("{escaped_path}", "default");'
-                rv.runtime.eval(mu_code, [])
-                exported_count = len(marked_frames)
-            except Exception as e:
-                print(f"NotesOverlay: Error exporting frames - {e}")
+            # Filter out frames with no visible content (empty text elements)
+            # RV marks frames with any paint element, including empty ones
+            paint_nodes = extra_commands.nodesInGroupOfType(source_group, "RVPaint")
+            if paint_nodes and marked_frames:
+                source_paint_node = paint_nodes[0]
+                valid_frames = []
+                for frame in marked_frames:
+                    texts, has_drawings = self.get_notes_for_frame(source_paint_node, frame)
+                    # Filter blank texts using the same logic as normalize_note
+                    valid_texts = [t for t in texts if self.normalize_note(t)]
+                    if valid_texts or has_drawings:
+                        valid_frames.append(frame)
+                    else:
+                        # Frame has only empty text elements - clean them up
+                        self._clean_empty_paint_elements(source_paint_node, frame)
+                marked_frames = valid_frames
 
-        # Restore original view
-        if original_view:
-            try:
-                commands.setViewNode(original_view)
-            except Exception as e:
-                print(f"NotesOverlay: Could not restore view - {e}")
+                # Clear RV marks and re-mark only valid frames
+                try:
+                    rv.runtime.eval("require rvui; rvui.clearAllMarks();", [])
+                    for frame in valid_frames:
+                        commands.markFrame(frame, True)
+                except Exception as e:
+                    print(f"NotesOverlay: Could not update marks - {e}")
 
-        return exported_count
+            exported_count = 0
+
+            if marked_frames:
+                # Determine number of digits needed for frame numbers
+                # Use at least 4 digits for consistency, but more if needed
+                max_frame = max(marked_frames)
+                num_digits = max(4, len(str(max_frame)))
+
+                # Build frame pattern (e.g., "####" for 4 digits)
+                frame_pattern = "#" * num_digits
+
+                # Build output path pattern
+                jpg_pattern = os.path.join(review_folder, f"{frame_pattern}.jpg")
+
+                # Reset view to fit image in viewport before export
+                try:
+                    rv.runtime.eval("require extra_commands; extra_commands.frameImage();", [])
+                except Exception as e:
+                    print(f"NotesOverlay: Could not frame view - {e}")
+
+                # Reset all color corrections before export
+                try:
+                    rv.runtime.eval("require rvui; rvui.resetAllColorParameters();", [])
+                except Exception as e:
+                    print(f"NotesOverlay: Could not reset color - {e}")
+
+                # Call RV's export function
+                try:
+                    escaped_path = jpg_pattern.replace("\\", "/")
+                    mu_code = f'require export_utils; export_utils.exportMarkedFrames("{escaped_path}", "default");'
+                    rv.runtime.eval(mu_code, [])
+                    exported_count = len(marked_frames)
+                except Exception as e:
+                    print(f"NotesOverlay: Error exporting frames - {e}")
+
+            return exported_count
+        finally:
+            # Restore original view
+            if original_view:
+                try:
+                    commands.setViewNode(original_view)
+                except Exception as e:
+                    print(f"NotesOverlay: Could not restore view - {e}")
 
     # -------------------------------------------------------------------------
     # Copy Notes
@@ -1270,8 +1251,7 @@ class NotesOverlayMode(MinorMode):
 
         # Copy to clipboard via Mu
         try:
-            # Escape special characters for Mu string literal
-            escaped_text = output_text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+            escaped_text = self._escape_text_for_mu(output_text)
             mu_code = f'require clipboard; clipboard.copyText("{escaped_text}");'
             rv.runtime.eval(mu_code, [])
 
@@ -1547,7 +1527,7 @@ class NotesOverlayMode(MinorMode):
         return unwrapped
 
     def format_notes_for_export(self, source_name, source_path, frame_notes, drawing_only_frames=None,
-                                 frames_folder=None, session_path=None):
+                                frames_folder=None, session_path=None):
         """
         Format notes for clipboard export.
 
