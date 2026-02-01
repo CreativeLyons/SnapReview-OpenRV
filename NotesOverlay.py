@@ -13,8 +13,7 @@
 #
 # The Mu module is required because:
 # 1. RV's native text entry mode doesn't support copy/paste
-# 2. PySide2/6 may not be available in all RV builds
-# 3. Mu provides direct access to Qt widgets via RV's Qt bindings
+# 2. Mu provides direct access to Qt widgets via RV's Qt bindings
 #
 # KEY TECHNICAL DISCOVERIES:
 # - QPushButton.clicked signal passes (bool checked) to callbacks
@@ -37,28 +36,8 @@ from rv.rvtypes import MinorMode
 import rv.runtime
 
 # -----------------------------------------------------------------------------
-# PySide imports (optional, for improved text input)
+# Note input uses Mu (notes_dialog.mu) - no PySide imports required
 # -----------------------------------------------------------------------------
-PYSIDE_AVAILABLE = False
-PYSIDE_VERSION = None
-
-try:
-    from PySide2.QtWidgets import QDialog, QVBoxLayout, QPlainTextEdit, QPushButton, QLabel
-    from PySide2.QtCore import Qt
-    import rv.qtutils
-    PYSIDE_AVAILABLE = True
-    PYSIDE_VERSION = "PySide2"
-except ImportError:
-    try:
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QPlainTextEdit, QPushButton, QLabel
-        from PySide6.QtCore import Qt
-        import rv.qtutils
-        PYSIDE_AVAILABLE = True
-        PYSIDE_VERSION = "PySide6"
-    except ImportError:
-        pass
-
-# PySide not required - using QInputDialog via Mu instead
 
 
 class NotesOverlayMode(MinorMode):
