@@ -251,7 +251,7 @@ class NotesOverlayMode(MinorMode):
 
         # Shadow offsets for outline effect (4 corners + 4 cardinals for thicker outline)
         # Offset proportional to text size
-        shadow_offset = 0.003  # 1.5x outline for readability over white
+        shadow_offset = self.SHADOW_OFFSET
         offsets = [
             # 4 corners
             (-shadow_offset, -shadow_offset),
