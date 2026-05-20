@@ -1,10 +1,10 @@
 # SnapReview for OpenRV
 
-📝 A Python plugin for [OpenRV](https://github.com/AcademySoftwareFoundation/OpenRV) that adds text annotation overlays to your review sessions.
+A Python plugin for [OpenRV](https://github.com/AcademySoftwareFoundation/OpenRV) that adds text annotation overlays to your review sessions.
 
 Changelog: [CHANGELOG.md](CHANGELOG.md)
 
-## ✨ Features
+## Features
 
 ![notesOverlay_RV_02b](https://github.com/user-attachments/assets/6d921c27-d68e-4cc3-bec1-f45059f87e04)
 
@@ -108,7 +108,7 @@ Frame 257
 | Cancel | `Escape` |
 
 
-## 🚀 Installation
+## Installation
 
 ### Quick Install (recommended)
 
@@ -132,7 +132,7 @@ ln -s /path/to/notes_dialog.mu ~/.rv/Mu/
 ln -s /path/to/clipboard.mu ~/.rv/Mu/
 ```
 
-## 📖 Usage
+## Usage
 
 ### Adding Notes
 
@@ -188,7 +188,7 @@ session:
 
 The export includes both this plugin's notes and RV's native text annotations. Frames with only drawings show `- *see annotated frame` as a placeholder.
 
-## ⚙️ Configuration
+## Configuration
 
 Text rendering can be customized by modifying constants in `NotesOverlay.py`:
 
@@ -198,7 +198,7 @@ MAX_CHARS_PER_LINE = 58     # Characters before wrapping
 LINE_SPACING = 0.08         # Space between stacked notes
 ```
 
-## 📚 About OpenRV
+## About OpenRV
 
 Open RV is the open-source version of RV, the Sci-Tech award–winning media review and playback software from the Academy Software Foundation.
 
@@ -206,7 +206,7 @@ Open RV is the open-source version of RV, the Sci-Tech award–winning media rev
 - **Documentation:** [Open RV Docs](https://aswf-openrv.readthedocs.io/)
 - **Package format:** [RV Reference Manual - Chapter 10](https://aswf-openrv.readthedocs.io/en/latest/rv-manuals/rv-reference-manual/rv-reference-manual-chapter-ten.html)
 
-## 📄 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).
 
