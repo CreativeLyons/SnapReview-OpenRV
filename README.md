@@ -41,7 +41,7 @@ Changelog: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
-### Save Review (New in v1.4.0)
+### Save Review
 - Export review package with `Cmd+Shift+S` (macOS) / `Ctrl+Shift+S` or SnapReview > Save Review
 - Creates timestamped folder next to source with:
   - RV session file (`.rv`)
